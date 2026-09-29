@@ -62,6 +62,54 @@ def set_text(cell, value):
     return cell
 
 
+def _text_width(s):
+    """Width of s in column-width units for a 12pt Times New Roman font (capitals and digits are wider)."""
+    return sum(1.35 if ch.isupper() else 1.1 if (ch.isdigit() or ch in "_%@#&") else 0.55 if ch in " .,:;'|!il" else 1.0 for ch in s)
+
+
+def _wrapped_lines(text, avail):
+    """Lines Excel needs for text in a cell `avail` units wide: word wrap (Excel also breaks after '-'),
+    pieces longer than a line are broken."""
+    import re
+    n = 0
+    for para in str(text).split("\n"):
+        line, lines = 0.0, 1
+        for word in para.split(" "):
+            for k, piece in enumerate(re.findall(r"[^-]*-|[^-]+", word) or [""]):
+                gap = 0.55 if (line and k == 0) else 0.0      # a space only before the first piece of a word
+                w = _text_width(piece)
+                if w > avail:                              # a long identifier breaks across lines
+                    if line:
+                        lines += 1
+                    full, rest = divmod(w, avail)
+                    lines += int(full) - (0 if rest else 1)
+                    line = rest
+                elif line and line + gap + w > avail:
+                    lines += 1; line = w
+                else:
+                    line += gap + w
+        n += lines
+    return n
+
+
+def fit_rows(sheet, rows, cols=None, line_pt=15.75, pad=4.0, min_pt=15.75, max_pt=409.0):
+    """Set each row's height so wrapped text shows in full. openpyxl cannot autofit, and the template's
+    fixed 15.75pt heights would clip the text to one line. Height = the most wrapped lines of any cell
+    in the row (word wrap simulated from the column width), checked against Excel's own AutoFit."""
+    widths = {}
+    for r in rows:
+        most = 1
+        for c in (cols or range(1, sheet.max_column + 1)):
+            v = sheet.cell(r, c).value
+            if v is None or v == "":
+                continue
+            L = openpyxl.utils.get_column_letter(c)
+            if L not in widths:
+                widths[L] = sheet.column_dimensions[L].width or 8.43
+            most = max(most, _wrapped_lines(v, max(1.0, widths[L] - 1.2)))
+        sheet.row_dimensions[r].height = max(min_pt, min(max_pt, most * line_pt + pad))
+
+
 class Workbook(object):
     def __init__(self, prof, ws, name, screen, ticket="", ascii_name="", version=1, out=None, sheet_title=None):
         cfg = prof.get("workbook", {}) or {}
@@ -179,6 +227,7 @@ class Workbook(object):
         sh.column_dimensions["H"].width = 55; sh.column_dimensions["J"].width = 40
         dv = DataValidation(type="list", formula1='"P,F,PE"', allow_blank=True); dv.add("E%d:G%d" % (f, last))
         sh.add_data_validation(dv)
+        fit_rows(sh, [r for r, _ in self.cases], cols=(2, 3, 4, 8, 9, 10))
         return last
 
     def table(self, name, title, headers, rows, widths, note=None):
@@ -195,6 +244,7 @@ class Workbook(object):
                 c = set_text(s.cell(r, i), v); c.font = self.FONT; c.border = BORDER
                 c.alignment = Alignment(wrap_text=True, vertical="top")
         s.freeze_panes = "A5"
+        fit_rows(s, range(4, 5 + len(rows)))
         return s
 
     def sheet_svc(self, rows, title, note):

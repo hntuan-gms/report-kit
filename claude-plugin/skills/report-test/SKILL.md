@@ -103,6 +103,7 @@ Do the steps in order and don't skip one. Each step leaves files in the workspac
 
 9. **Write the workbook: `<workspace>/build_workbook.py`, then `rt build <code>`.** See `references/output-format.md`.
    - The script uses `reportkit.workbook.Workbook` (the project's template, 7 sheets). `workbook.details_from_run(run_dir)` gives the "Chi tiết sai lệch dữ liệu" rows.
+   - **Write the test case sheet for a Tester / BA reader** (`references/output-format.md`, "Writing style"): screen actions in C; H starts with `Đạt.` / `Sai.` / `Cần BA xác nhận.` and says what was seen, with one example; `file:line`, table / column names and run ids go to the `Kỹ thuật:` line of J.
    - **The set is complete when every requirement has a case, not when it reaches a number.** Build the "Ma trận bao phủ" sheet with `wb.sheet_coverage(rows, title)`: one row per SRS cell, standard section, code rule (`file:line`), FOUND trap and applicable checklist item (`references/test-areas.md`), each pointing at the cases that test it. A row with no case says `Không áp dụng: …` or `Chưa phủ: …`. Writing the matrix is how you find the missing cases: add them before building.
    - The file name comes from the profile. Never overwrite a delivered version: bump `version`.
    - `rt build` runs the quality gate. Fix what it lists:

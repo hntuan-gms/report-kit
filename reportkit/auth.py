@@ -3,7 +3,7 @@
 keycloak_sso (profile `auth:` block):
     choose_button: {internal: "<text>", external: "<text>"}   # button on the landing page, optional
     username: "#username"   password: "#password"   submit: "#kc-login"
-    profile_endpoint: /auth/profile                            # GET, used to verify the session
+    profile_endpoint: /auth/profile                            # GET, used to verify the session (a system may override it)
     profile_fields: {login: loginName, name: fullName, super_admin: isSuperAdmin}
 
 Lessons built in (1E_117, 28/09/2026):
@@ -55,7 +55,8 @@ def login(profile, system, login_type=None, headless=True):
 
 def whoami(profile, system):
     a = profile.get("auth", {}) or {}
-    ep = a.get("profile_endpoint")
+    # a system may override the endpoint (the audit API serves the profile at /audit/profile)
+    ep = (profile.get("systems", {}).get(system, {}) or {}).get("profile_endpoint") or a.get("profile_endpoint")
     if not ep:
         return {"ok": True, "note": "no profile_endpoint configured"}
     _, jar = http.session_paths(profile, system)

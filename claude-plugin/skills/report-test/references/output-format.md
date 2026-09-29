@@ -1,11 +1,18 @@
 # Output format: the test case workbook
 
 One `.xlsx` per report, built with `reportkit.workbook.Workbook` from the template named in the profile (`workbook.template`, KBKT by default).
-The project's approved reference workbook, if any, is named in `.report-kit/rules/` (for GMS IDS: `AI-33_1E127_..._v3.xlsx`, see worked-example-1E127.md).
+There is no reference workbook to copy wording from: follow the rules on this page.
+
+## Level of detail to aim for
+
+- **Data comparison:** state the scope and the result in numbers, e.g. "118 công ty, 1.837 ô có dữ liệu, 29 ô sai, 9 ô chưa rõ quy tắc". Every wrong cell is traced to the source record that causes it.
+- **Each data rule has one real example** from the environment: a correction chain with the value it changes, a draft on top of an approved record, a NULL period, a deleted or out-of-scope record, duplicates. Name it (company, period, ID, value).
+- **Each bug states:** the mechanism in one sentence (what the code does wrong), how many cells or rows it hits, and one concrete example. "The dedup takes the latest row with no status filter, so drafts override approved values (27 ô; ANV 2022: 18 → 23)."
+- **The SRS-vs-code sheet lists every point**, including the ones that are not bugs: indicators missing from the SRS, source forms not specified, rules one report applies and a sibling report doesn't, rules nobody wrote down.
 
 ## File name and version
 
-`AI-<jira-or-ticket>_<code without #>_<TenKhongDau>_v<N>.xlsx`, e.g. `AI-33_1E127_BaoCaoQuanTriTungCongTy_v3.xlsx`.
+`AI-<jira-or-ticket>_<code without #>_<TenKhongDau>_v<N>.xlsx`, e.g. `AI-60_2E50_BaoCaoTongHopDanhSachCongTyKiemToan_v1.xlsx`.
 - Ask for the AI-xx ticket number if you don't know it.
 - Never overwrite a file that was sent for review. Create `v<N+1>`, because the reviewer's comments live in the old one.
 
@@ -35,13 +42,33 @@ Columns:
 
 | Col | Content | Rule |
 |---|---|---|
-| B | Mục đích kiểm thử | "Kiểm tra …" and specific ("Kiểm tra STT 1-2 ở cột kỳ KHÔNG có bản nộp") |
-| C | Các bước thực hiện | Numbered steps. Name the concrete test data used (company ticker, year) |
-| D | Kết quả mong muốn | What must happen, stated independently of what the system does |
+| B | Mục đích kiểm thử | "Kiểm tra …" in plain words, specific ("Kiểm tra số kiểm toán viên 'Hiện tại' không bị âm") |
+| C | Các bước thực hiện | Numbered **screen actions** with the concrete data used ("1. Chọn Từ năm = 2026, Tên công ty = Công ty TNHH KPMG 2. Nhấn [Tìm kiếm] 3. Xem nhóm …"). No API paths |
+| D | Kết quả mong muốn | What must happen, in business terms, stated independently of what the system does |
 | E/F/G | Lần 1/2/3 | `P` / `F` / `PE` only, with green / red / yellow fill. Empty = not run |
-| H | Kết quả hiện tại | **What actually happened in the app, with concrete values.** Never just P/F/PE. Not run → `Chưa thực hiện - <reason>` (e.g. `- cần dữ liệu`, `- cần tài khoản không phải admin`) |
+| H | Kết quả hiện tại | Starts with `Đạt.` (P) / `Sai.` (F) / `Cần BA xác nhận.` (PE) / `Chưa thực hiện - <lý do>` (not run). Then **what was seen on the screen or in the file**, one concrete example (company name, year, value), and for F / PE the cause in business words. No `file:line`, table / column names, record IDs or run ids here |
 | I | Mã lỗi | Bug id from sheet "Danh sách lỗi" |
-| J | Ghi chú | The **basis** of the expected result: `Căn cứ: SRS`, `Căn cứ: Quy chuẩn chung TC-TK mục II.3`, `Căn cứ: code (SRS và Quy chuẩn chung không quy định) - cần BA xác nhận`, plus how the data was checked |
+| J | Ghi chú | Line 1: the **basis**: `Căn cứ: SRS …`, `Căn cứ: Quy chuẩn chung mục II.3`, `Căn cứ: code (SRS và Quy chuẩn chung không quy định) - cần BA xác nhận (BA làm rõ N)`. Line 2 `Kỹ thuật: …`: the evidence for DEV / BA: `file:line`, table.column, record IDs, SQL counts, run ids (U05, D04) |
+
+### Writing style (test case sheet)
+
+The test case sheet is read by Testers and BAs, not only by DEV. Write it so a reader who has never opened the code understands every row.
+- Short Vietnamese sentences, one idea each. Name things the way the screen names them (the column title, the button label, the company name), not by table / column / variable names.
+- No internal shorthand in B, C, D, H: no `NaN`, `MATCH`, `NM`, `view`, `dedup`, `RN = 1`, `CTE`, `API`, `request`. When a technical term is unavoidable, explain it once in plain words.
+- Technical detail is never lost: it moves from H to the `Kỹ thuật:` line of J, or to the sheets "So sánh SRS - Code" / "Danh sách lỗi" / "Chi tiết sai lệch dữ liệu", which keep the full technical wording for DEV.
+- Numbers use the Vietnamese format in prose (1.837 ô, 6.136 lượt); values copied from the screen stay as shown.
+
+Example (F):
+
+| Cột | Text |
+|---|---|
+| B | Kiểm tra số kiểm toán viên "Hiện tại / Cuối kỳ" không bị âm |
+| C | 1. Chọn Từ năm = Đến năm = 2026, Tên công ty = Công ty TNHH KPMG<br>2. Nhấn [Tìm kiếm]<br>3. Xem nhóm "Thông tin tăng/giảm KTV", cột BTC và UBCK |
+| D | Hiện tại = Đầu kỳ + Tăng − Giảm. Đây là số người nên không bao giờ âm |
+| H | Sai. KPMG năm 2026 hiện Đầu kỳ 0, Tăng 0, Giảm 40, Hiện tại −40 (cả BTC và UBCK). Cũng bị âm: AISC (−29 / −23). Nguyên nhân: 40 kiểm toán viên nghỉ được trừ ở cột Giảm nhưng chưa từng được cộng vào Đầu kỳ, vì quyết định chấp thuận của họ không ghi ngày ban hành. |
+| J | Căn cứ: SRS AG6.<br>Kỹ thuật: view so sánh APPROVAL_ISSUE_DATE = MIN(…), bản ghi ngày ban hành NULL bị loại (R104_v_rpt_tong_hop_ctkt.sql:272-294); API trả btcAudHienTai = −40 (D04, U14). |
+
+Example (PE), column H: "Cần BA xác nhận. Hệ thống có hiện ngày, ví dụ PKF Việt Nam bị thu hồi ngày 11/07/2026. Nhưng SRS yêu cầu lấy ngày từ một trường khác, và trường đó đang trống ở mọi bản ghi. Nếu làm đúng SRS thì hai cột này luôn trống."
 
 Status meaning:
 - `P`: matches the expected result.

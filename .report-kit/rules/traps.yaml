@@ -1,0 +1,22 @@
+# Data traps: see reportkit/probe.py. Add the pitfalls of your own data model here.
+traps:
+  - id: status_mix
+    title: Several approval statuses side by side
+    pick: {st: [STATUS, STATUS_CD]}
+    sql: "SELECT NVL(TO_CHAR({st}),'NULL') V, COUNT(*) N FROM {table} GROUP BY NVL(TO_CHAR({st}),'NULL') ORDER BY 2 DESC"
+    flag: {rows_gt: 1}
+  - id: lang_mix
+    title: Several languages side by side
+    needs: [LANGUAGE_CD]
+    sql: "SELECT NVL(LANGUAGE_CD,'NULL') V, COUNT(*) N FROM {table} GROUP BY NVL(LANGUAGE_CD,'NULL') ORDER BY 2 DESC"
+    flag: {rows_gt: 1}
+  - id: soft_deleted
+    title: Soft-deleted rows
+    needs: [DELETE_FLG]
+    sql: "SELECT NVL(TO_CHAR(DELETE_FLG),'NULL') V, COUNT(*) N FROM {table} GROUP BY NVL(TO_CHAR(DELETE_FLG),'NULL')"
+    flag: {rows_gt: 1}
+  - id: year_end_time
+    title: Rows on 31/12 after midnight (lost by a TO_DATE('...-12-31') upper bound)
+    pick: {dt: [CREATED_DATE]}
+    sql: "SELECT EXTRACT(YEAR FROM {dt}) Y, COUNT(*) N FROM {table} WHERE TO_CHAR({dt},'MMDD') = '1231' AND {dt} <> TRUNC({dt}) GROUP BY EXTRACT(YEAR FROM {dt})"
+    flag: {rows_gt: 0}
