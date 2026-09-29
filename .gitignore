@@ -1,0 +1,10 @@
+__pycache__/
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+# never commit credentials or run output
+secrets*.yaml
+*.local.yaml
+*.local.json
+work/

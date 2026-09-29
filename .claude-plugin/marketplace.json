@@ -1,0 +1,11 @@
+{
+  "name": "gms-qa",
+  "owner": {"name": "hntuan"},
+  "plugins": [
+    {
+      "name": "report-kit",
+      "source": "./claude-plugin",
+      "description": "/report-test <code>: test a report screen end to end (reportkit CLI + skill)"
+    }
+  ]
+}

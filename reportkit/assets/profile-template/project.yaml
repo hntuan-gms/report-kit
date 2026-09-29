@@ -1,0 +1,67 @@
+# reportkit profile. Everything project-specific lives here. NO credentials in this file:
+# put them in ~/.report-kit/secrets.yaml under the key given by `name`, or in RK_* env vars.
+# Per-user overrides (tools_dir, work_root) go in project.local.yaml next to this file (git-ignore it).
+
+name: my-project
+repo_root: ..                                   # the repo this folder belongs to
+
+paths:
+  tools_dir: "{home}/Documents/TestInputs"      # function list, SRS files, workbook template, standard document
+  work_root: "{home}/report-kit-work/my-project" # outside every repo: inputs, traces, runs, screenshots
+  code_root: "{repo_root}"                      # where the application code is
+
+systems:                                        # one per deployed application under test
+  main:
+    match: ["Main"]                             # values of the function list's system column that mean this system
+    web: https://app.example.test
+    api: https://api.example.test/api/v1
+
+auth:
+  type: keycloak_sso                            # log in through the real SSO page
+  choose_button: {}                             # e.g. {internal: "Internal users", external: "External users"}
+  default_type: external
+  username: "#username"
+  password: "#password"
+  submit: "#kc-login"
+  profile_endpoint: /auth/profile               # GET that answers 200 with the user when the session is valid
+  profile_fields: {login: loginName, name: fullName, super_admin: isSuperAdmin}
+
+db:
+  driver: oracle
+  dsn: host:1521/service
+  users: {main: APP_SCHEMA}                     # schema key -> DB user
+  default_schema: main
+  call_timeout_ms: 120000
+
+ui:
+  locale: en-US
+  settle_ms: 5000
+  api_marker: "/api/"
+  toast: "[class*=toast]"
+  lang: {}                                      # e.g. {open: "#lang", en: "[aria-label='English']", vi: "..."}
+
+inputs:
+  function_list:
+    glob: "*function list*.xlsx"
+    header_contains: "Code"                     # a text found in the header row
+    columns: {jira: "Jira", ticket: "Ticket", name: "Name", pic: "PIC", srs: "SRS", system: "System"}
+  srs_globs: ["SRS/**/*{code}*", "SRS/**/{srs}"]
+  standard: {glob: "**/*standard*.docx", summary: rules/standard.md}
+  previous_workbooks: "*{code_nodash}*.xlsx"
+
+codemap:
+  include: ["**/src/main/**/*.java", "**/src/app/**/*.ts", "**/src/app/**/*.html", "**/*.sql"]
+  exclude: ["**/*.spec.ts", "**/test/**"]
+  stop_tokens: []
+
+rules:
+  traps: rules/traps.yaml
+
+workbook:
+  template: "{tools_dir}/Template/KBKT_Template.xlsx"
+  out_dir: "{tools_dir}"
+  file_name: "{ticket}_{code_nodash}_{ascii_name}_v{version}.xlsx"
+  first_row: 12
+  style_rows: {chapter: 12, pre: 13, cat: 14, sub: 15, grp: 24, case: 16}
+  header_cells: {screen: D2, code: D3}
+  run_header_row: 11
