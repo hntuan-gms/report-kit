@@ -90,3 +90,55 @@ For each rule in the report's view (the WHERE conditions, joins, dedup/ROW_NUMBE
 
 - The export / search API returns nothing for a company the user has no permission for (I.3.1, except the listed menus).
 - This needs a non-admin account. If only an admin works, mark the case not run and cite older evidence.
+
+## An toàn thông tin (always the last category)
+
+A report screen takes input in three places — the filter fields, the URL, and the data it renders — so cover XSS and
+SQL Injection across those. Write the cases in two sub-sections plus one Insert case. Judge each against what the app
+did, not the payload. This is defensive, read-only checking; keep to the safety rules below.
+
+**1. Kiểm tra XSS**
+- *Đoạn mã kịch bản nhập vào bộ lọc.* Type a script snippet into a text field of the filter; if the screen has no
+  saved text field, use the quick-search box of a dropdown. Expected: shown verbatim, never executed. Three variants —
+  plain, percent/hex-encoded, and several tags nested — as one case each. Name the field as the screen labels it, and
+  confirm on the screenshot which field the text actually went into. A screen with no text input (e.g. a dashboard with
+  only a year list) → "Không áp dụng".
+- *Đoạn mã kịch bản trong đường dẫn.* Put the snippet (a) in a query parameter of the screen's own route and (b) as an
+  invalid path segment. Expected: nothing runs; an invalid path shows a "not found" page. Same three variants.
+- *Dữ liệu trả về chứa đoạn mã.* Stub the search response (in the browser, nothing stored) so a few rows carry a script
+  snippet or an image-with-handler in a text column, run the search, read the grid. Expected: shown as plain text, no
+  element injected, nothing runs. No grid on the screen → "Không áp dụng"; can't reach the grid (required fields) →
+  "Không đo được", say why.
+
+**2. Kiểm tra SQL Injection - Select**
+- *Đăng nhập bằng chuỗi chèn.* If login is a shared SSO owned by another team, don't test it from here → "Chưa thực
+  hiện", say why.
+- *Chuỗi chèn trong tham số lọc và ô tìm kiếm.* Send, in a filter field and in the request, strings that carry SQL
+  control syntax: a lone quote with an always-true condition, a query that joins another table, a query that drops a
+  table, a query that lists tables. Expected: rejected or "không tìm thấy", no data outside the user's scope, and **no
+  database error or query text in the response**. Do the "or always-true", the "join", and the "drop/list" as separate
+  cases.
+
+**Kiểm tra SQL Injection - Insert.** A report screen usually can't add records → "Không áp dụng". If it can, the insert
+must be blocked or store exactly the typed value.
+
+### How to measure (kit steps, repo-agnostic)
+- **UI entry:** set a trap for dialogs with a `js` step (record `alert`/`confirm`/`prompt`), type into the field with a
+  `js` step, try the URL with `goto`, stub the data with `route`; observe the recorded dialogs, any injected
+  `img`/`script` node, the page title and final URL. An empty observation usually means a wrong selector — look at the
+  final screenshot.
+- **API/data entry:** call the read-only search endpoint (handler already confirmed read-only) with the injection
+  string in one filter key; record the status, whether the message contains a database error or the query text, and
+  that a plain valid request still returns data afterwards.
+
+### Safety (same as the rest of the run)
+- Read-only: only the search / read endpoints, never export in a loop, never a real login attempt, nothing written.
+- The URL and stub cases run in the browser; the injection strings never reach a write path.
+
+### Judging
+- **P:** not executed / rejected / nothing leaked.
+- **F:** it executed, or the response leaked a DB error or the query (table and column names), or an invalid path led
+  to a screen with real data instead of a "not found" page. An F needs two sources (observation + screenshot/response).
+- **Không áp dụng / Chưa thực hiện / Không đo được:** state the reason (no such function, shared SSO, blocked by
+  required fields).
+- Coverage matrix: one row per case family above.

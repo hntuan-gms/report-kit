@@ -34,9 +34,13 @@ Chức năng
   Làm mới / Tìm kiếm - Bộ lọc / Xuất Excel - Thành công / Không thành công
   Dữ liệu báo cáo - <one sub-section per data rule family>
   Phân quyền dữ liệu
+An toàn thông tin                                          (category, green - always, last)
+  1. Kiểm tra XSS
+  2. Kiểm tra SQL Injection - Select
+  Kiểm tra SQL Injection - Insert
 ```
 - Do **not** include "Validate các trường" (per-field input validation). The team calls it "test dữ liệu đầu vào" and it is out of scope.
-- Do not include "An toàn thông tin" either, unless asked.
+- **Always include "An toàn thông tin"**, as the last category: XSS and SQL Injection across the filter fields, the URL and the rendered data. `test-areas.md`, "An toàn thông tin", has the full list of cases, how to measure them and how to judge them. A case that does not fit the screen (no delete, no insert, login on a shared SSO) stays in the block with the reason in H.
 
 Columns:
 

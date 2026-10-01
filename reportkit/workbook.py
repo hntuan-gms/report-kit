@@ -136,6 +136,10 @@ class Workbook(object):
         for m in [str(m) for m in sh.merged_cells.ranges if m.min_row >= self.first]:
             sh.unmerge_cells(m)
         sh.delete_rows(self.first, sh.max_row)
+        # delete_rows() leaves the template's row properties behind: from row ~101 the KBKT template has
+        # hidden, grouped rows, so every case written there was invisible in Excel (1E_119, 1E_126, 2E_54 v2...).
+        for r in [r for r in sh.row_dimensions if r >= self.first]:
+            del sh.row_dimensions[r]
         sh._images = []                       # the KBKT template carries thousands of stray images
         sh.data_validations.dataValidation = []
         hc = cfg.get("header_cells", {"screen": "D2", "code": "D3"})
@@ -362,6 +366,13 @@ def coverage_gate(path, probe_json=None, first_row=12, code_cell="D3"):
                                                    if sh.cell(r, 4).value not in (None, "") and sh.cell(r, 2).value)
                                    if cid not in referenced]
     return res
+
+
+def hidden_rows(path, first_row=12):
+    """Rows of the test case sheet that Excel will not show (hidden rows or collapsed groups) - quality gate."""
+    sh = openpyxl.load_workbook(path).worksheets[0]
+    return [r for r in range(first_row, sh.max_row + 1)
+            if sh.row_dimensions[r].hidden and (sh.cell(r, 2).value or sh.cell(r, 4).value)]
 
 
 def tally(path, first_row=12):
