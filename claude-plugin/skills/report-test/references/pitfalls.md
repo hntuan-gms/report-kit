@@ -22,6 +22,7 @@ Project-specific lessons live in the profile's `rules/lessons.md`. These apply e
 ## Excel
 - **Compare what Excel displays, not the raw value.** The kit applies number and date formats: 2.0 with `#,##0` shows "2".
 - **Text starting with "=" becomes a formula** and Excel then "repairs" the file by deleting the cell. Write cells through `Workbook.tc()` / `table()`.
+- **openpyxl without Pillow drops every picture when it loads a workbook.** A patch script (`load_workbook` + `save`) on a workbook with "Hình ảnh lỗi" silently deletes the pictures. Rebuild from `build_workbook.py` instead.
 
 ## UI
 - **Never wait for "networkidle".** SPAs and SSO pages keep background requests open. Wait for "load", then for the element you need (`ready`).

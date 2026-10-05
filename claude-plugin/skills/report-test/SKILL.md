@@ -87,7 +87,8 @@ Do the steps in order and don't skip one. Each step leaves files in the workspac
      - values with no data belong in the scope too: put them in a separate entry without `require: actual_rows`, so "empty on both sides" shows as MATCH instead of NM.
    - **UI entries:**
      - steps and observations for what the cases need: titles, labels, dropdown values, tooltips, requests fired, toasts, downloads, zoom, Tab order, English mode, a simulated 500;
-     - add `ready` / `require` preconditions so a bad measurement shows as NM instead of misleading you.
+     - add `ready` / `require` preconditions so a bad measurement shows as NM instead of misleading you;
+     - name the areas a bug picture would need (`boxes: {filters: …, grid: …}`): their positions are recorded with the final screenshot, so step 9 can crop it without a new capture.
    - Read `runs/<id>/summary.md`:
      - **NM / ERR** means the measurement failed, not the app. Fix the entry and re-run only those with `rt check <code> --redo` (or `--only U03,U05`);
      - **DIFF**: trace each differing cell back to the source row with `rt sql`, and cite one concrete example (ID, value, date) per cause;
@@ -101,20 +102,29 @@ Do the steps in order and don't skip one. Each step leaves files in the workspac
 
    A point the standard settles cites its section. It is not logged as a bug or a question.
 
-9. **Write the workbook: `<workspace>/build_workbook.py`, then `rt build <code>`.** See `references/output-format.md`.
-   - The script uses `reportkit.workbook.Workbook` (the project's template, 7 sheets). `workbook.details_from_run(run_dir)` gives the "Chi tiết sai lệch dữ liệu" rows.
+9. **Evidence of every bug, at the lowest cost** (`references/output-format.md`, "Hình ảnh lỗi"). Every bug that is not withdrawn or closed gets a picture card in "Hình ảnh lỗi"; the layout comes from `reportkit.evidence`, no sample workbook is needed. Spend as little as possible:
+   - **Reuse step 7 first.** Its pictures are from today's build. For a screen bug that an entry already observed, use `E.run_shot(run, "U07", caption, mark=[obs name], show=[area])`: the kit crops and outlines from the positions recorded during `rt check`. **Don't open a screenshot to find coordinates.** For a data / format bug, use the Excel already downloaded in step 7 (`shots/<id>_<file>`) with `E.excel`, and the source rows you already fetched with `rt sql` while tracing the cause, with `E.table`.
+   - **Capture only what step 7 did not show** (a dropdown that must be open, a hover, another account, an element no entry observed). Add those entries with `screenshot: {name, selector, highlight}` and run them **all in one** `rt check <code> --only …`. A bug common to every screen (wrong-URL page, future date allowed) is one small entry.
+   - **Write only what the bug list doesn't have.** Leave `title`, `severity`, `status`, `basis`, `cause` empty: they come from the bug's row of "Danh sách lỗi", and the status becomes "Mở - còn lỗi <date of the picture>". Write the steps, actual, expected, panels, note. Put the shared `account` / `env` / `build` / `screen` in one dict and pass it to every card.
+   - **Look only where the kit warns.** `rt build` prints one line per card (`evidence BUG-03: 1360x1420 px, 3 panels, OK` or the warnings: nothing marked, marked cell hidden, picture not from today, card too long). Open the first card of the run, to check the layout, and the cards with warnings. Fix them, then rebuild.
+   - The card's date is the picture's. An older picture is evidence of its own build only: the status must say "chưa kiểm lại" (the lint checks it).
+   - A bug no picture can show goes to `no_image` with the reason.
+
+10. **Write the workbook: `<workspace>/build_workbook.py`, then `rt build <code>`.** See `references/output-format.md`.
+   - The script uses `reportkit.workbook.Workbook` (the project's template, 8 sheets). `workbook.details_from_run(run_dir)` gives the "Chi tiết sai lệch dữ liệu" rows; `wb.sheet_evidence(cards, title, note, no_image)` builds "Hình ảnh lỗi" and links it with "Danh sách lỗi".
    - **The sheet always ends with the "An toàn thông tin" category** (XSS + SQL Injection; the cases, how to measure and how to judge them are in `references/test-areas.md`). Measure them in step 7 like any other UI / API entry, and give each case family a coverage-matrix row.
    - **Write the test case sheet for a Tester / BA reader** (`references/output-format.md`, "Writing style"): screen actions in C; H starts with `Đạt.` / `Sai.` / `Cần BA xác nhận.` and says what was seen, with one example; `file:line`, table / column names and run ids go to the `Kỹ thuật:` line of J.
    - **The set is complete when every requirement has a case, not when it reaches a number.** Build the "Ma trận bao phủ" sheet with `wb.sheet_coverage(rows, title)`: one row per SRS cell, standard section, code rule (`file:line`), FOUND trap and applicable checklist item (`references/test-areas.md`), each pointing at the cases that test it. A row with no case says `Không áp dụng: …` or `Chưa phủ: …`. Writing the matrix is how you find the missing cases: add them before building.
    - The file name comes from the profile. Never overwrite a delivered version: bump `version`.
    - `rt build` runs the quality gate. Fix what it lists:
      - every case has a concrete "Kết quả hiện tại", and every F has a bug id;
-     - the coverage matrix exists, every row without a case gives its reason, and every FOUND trap of `probe.md` is named in a row (trap id in "Mục", plus the table when the trap is FOUND on several tables).
+     - the coverage matrix exists, every row without a case gives its reason, and every FOUND trap of `probe.md` is named in a row (trap id in "Mục", plus the table when the trap is FOUND on several tables);
+     - every open bug has a picture in "Hình ảnh lỗi", or `Không có hình: <lý do>`.
 
-10. **Hand off.**
+11. **Hand off.**
     - Start with one line naming the audience.
     - Give the workbook path, and the counts per section (P / F / PE / not run).
-    - Give the data coverage (entries, cells compared, cells differing, with causes), and the main bugs, each with one concrete example.
+    - Give the data coverage (entries, cells compared, cells differing, with causes), and the main bugs, each with one concrete example and the number of pictures.
     - Give the requirement coverage from the matrix: rows covered, not applicable, not covered (with why).
     - Say what could not be run and why, and what changed since the previous version.
 

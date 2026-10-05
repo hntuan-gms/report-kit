@@ -94,18 +94,60 @@ Get the build date with `curl -sI <site>/ | grep -i last-modified`.
    - Types: Xung đột SRS-Code / Code có - SRS thiếu / SRS có - Code thiếu / SRS mơ hồ / SRS tự mâu thuẫn / Khác.
    - Status wording: "Đã chốt: hệ thống đang đúng", "Đã chốt - DEV phải sửa (BUG-xx)", "Còn mở", "Còn mở - SRS … phải ghi rõ".
    - The note in row 2 names every source used, including the repo commit and the dev run dates.
-2. **Danh sách lỗi**: `BUG-nn`, severity, status, description, basis, cause in code, evidence (date + concrete values).
+2. **Danh sách lỗi**: `BUG-nn`, severity, status, description, basis, cause in code, evidence (date + concrete values), and **Hình ảnh minh chứng** (column H, filled by `wb.sheet_evidence`: a link "Xem hình BUG-01 (1/2) (+1 hình tiếp theo)" to the picture, or `Không có hình: <lý do>`).
    - Statuses: Mới / Mở / Mở (chưa kiểm lại được) / Đã đóng / Rút lại theo Quy chuẩn …
    - Keep withdrawn and closed bugs listed, with the reason, so reviewers can trace them.
-3. **Chi tiết sai lệch dữ liệu**: every wrong cell from the data comparison. Give the key, column, field, value shown, expected value, cause (which submission / rule) and bug id. The note states the expected-value rule and what was excluded.
-4. **BA làm rõ**: topic, question, severity, status (`Đã chốt` / `Còn mở` / `Chốt một phần`), answer. When the Quy chuẩn settles a question, keep it and fill in the answer with the section number.
-5. **Nguồn dữ liệu**: one row per output row or column. Give where it comes from (table.column / form field code / FIELD_ID / data type / lookup group) and its mapping to the SRS item. Mark "Không có trong SRS" where it applies.
-6. **Ma trận bao phủ**: the answer to "is the set complete?". Built with `wb.sheet_coverage(rows, title)`, one row per requirement:
+3. **Hình ảnh lỗi**: one picture per bug, or per way the bug shows (two causes, two screens: `BUG-01 (1/2)`, `(2/2)`). Built with `wb.sheet_evidence(cards, title, note, no_image)`; see "Hình ảnh lỗi" below.
+4. **Chi tiết sai lệch dữ liệu**: every wrong cell from the data comparison. Give the key, column, field, value shown, expected value, cause (which submission / rule) and bug id. The note states the expected-value rule and what was excluded.
+5. **BA làm rõ**: topic, question, severity, status (`Đã chốt` / `Còn mở` / `Chốt một phần`), answer. When the Quy chuẩn settles a question, keep it and fill in the answer with the section number.
+6. **Nguồn dữ liệu**: one row per output row or column. Give where it comes from (table.column / form field code / FIELD_ID / data type / lookup group) and its mapping to the SRS item. Mark "Không có trong SRS" where it applies.
+7. **Ma trận bao phủ**: the answer to "is the set complete?". Built with `wb.sheet_coverage(rows, title)`, one row per requirement:
    - Sources, in this order: every SRS cell that states a rule; every standard section that applies (and one row for the sections that don't, with why); every data / display rule of the code (`file:line`); every FOUND trap of `probe.md`; every applicable item of `references/test-areas.md`; the sibling difference (e.g. "Tài khoản CTĐC") when the brief lists siblings.
    - Each row is `(source, item, requirement, case_keys, note)`. `case_keys` are the beginnings of the cases' "Mục đích"; the kit fills in the case ids (as column A shows them) and the P / F / PE tally, and raises an error when a key matches no case.
    - A row with no case must have a note starting `Không áp dụng: <why>` or `Chưa phủ: <why>`.
    - For a trap, put its id in "Mục" as `probe.md` prints it; when the same trap is FOUND on several tables, add the table: `soft_deleted (FORMS)`.
    - `rt build` fails when the sheet is missing, a row has no case and no reason, or a FOUND trap is in no row. It also lists cases that no requirement points to (information only).
+
+## Hình ảnh lỗi (bug pictures)
+
+A reviewer must see each bug without re-running anything. Every bug whose status is not "Rút …" / "Đã đóng" gets at least one card (`reportkit.evidence.card`), rendered to `<workspace>/evidence/BUG-01_1.png` (+ `.html`) and embedded in the sheet.
+
+What a card shows, top to bottom:
+
+| Part | Content |
+|---|---|
+| Header | `BUG-01 (1/2)`, chip `Cao · Mở - còn lỗi 05/10`, the bug's short title (same wording as "Danh sách lỗi") |
+| Meta | `Tái hiện: dd/mm/yyyy HH:MM` · account · environment · build · menu path |
+| Các bước tái hiện | numbered screen actions with the concrete values (company, year, period), like column C of the test case sheet |
+| Kết quả thực tế (red) | what the screen / file shows, with the wrong values in **bold** |
+| Kết quả mong đợi (green) | the correct values and which record they come from |
+| ①②③ panels | the evidence, each with a caption that says what to look at |
+| Note (yellow) | same cause elsewhere, how many cells / rows, pointer to "Chi tiết sai lệch dữ liệu" |
+| Footer | `Căn cứ:` (SRS / Quy chuẩn §) · `Nguyên nhân (code):` (`file:line`) |
+
+Panels, by kind of bug:
+
+| Bug | Panels |
+|---|---|
+| Screen (label, alignment, English mode, dropdown, toast, menu, 404 page) | `E.run_shot(run, "U07", caption, mark=[obs name], show=[area])` on the step 7 entry that observed it: cropped and outlined from the recorded positions. Only if no entry shows it: a new entry with `screenshot: {name, selector, highlight}` (`checks-guide.md`) and `E.shot` |
+| Data (wrong value, row missing / extra) | `E.run_shot` of the filters at export time; `E.excel` of the file downloaded in step 7 with `bad=[cells]` and `extra={row: correct value}` (header row: "Giá trị đúng (Tester ghi thêm, không có trong file)"); `E.table` of the source rows already fetched with `rt sql`, the row the standard picks `ok`, the row the report uses `bad` |
+| File format (number / date format, borders, empty file with STT 1, title) | `E.excel` of the area. It is drawn from the file itself (format, borders, merges), so never hide the defective rows |
+| API (HTTP 500, SQL text in the response, missing permission check) | `E.text` with the request and the start of the response; plus `E.shot` when the user sees something on the screen |
+| Permission | one card per account: the account that must not see the data, what it sees |
+
+Rules:
+- **The date is the date of the picture.** `captured` defaults to the time of the first screenshot. Reproduce on the build being reported, the same day, then write the status "Mở - còn lỗi dd/mm". A screenshot from an earlier run is evidence of that run's build only: say so ("Chụp 29/09/2026, chưa kiểm lại trên bản build 05/10") and set the status "Mở (chưa kiểm lại được)".
+- **One picture proves one thing.** Crop to the area (filters + the wrong cells), and hide the Excel rows / columns that don't matter with `rows=` / `cols=`, saying so in the caption ("Đã ẩn các dòng STT không liên quan"). The wrong value must be readable at 1000 px wide.
+- Wording is for a Tester / BA, like the test case sheet (`Writing style`). Technical names go to the footer only.
+- **Cost.** Opening pictures is the expensive part, so:
+  - never open a screenshot to find coordinates: `E.run_shot` crops and outlines from the positions `rt check` recorded;
+  - don't re-capture what step 7 already shows. New captures are only for what no entry observed, all in one `rt check --only …`;
+  - don't rewrite the bug: empty `title` / `severity` / `status` / `basis` / `cause` come from "Danh sách lỗi";
+  - `rt build` lints every card and prints one line each. Open the first card of the run (layout) and the cards with warnings, nothing else.
+- The kit refuses an `E.text` that contains credentials (Authorization, Bearer, password, cookie, token).
+- A bug no picture can show (a time-out, a race) goes to `no_image={"BUG-07": "<lý do>"}`; it is written as `Không có hình: <lý do>`. `rt build` fails on any other open bug without a picture.
+- The sheet note (row 2) gives: capture date and time range, build, accounts (and which bug used another account), browser size (1440x900), what the Excel pictures are ("dựng lại từ chính file đã tải về; ô sai tô đỏ, cột nền xanh do Tester ghi giá trị đúng"), "Dữ liệu nguồn: SELECT chỉ đọc", "Không tạo / sửa dữ liệu trên môi trường".
+- Never patch a workbook that has pictures with `openpyxl.load_workbook` + `save`: without Pillow, openpyxl drops every image when it loads a file. Change `build_workbook.py` and rebuild a new version.
 
 ## Hand-off message to the user
 
@@ -114,14 +156,15 @@ Get the build date with `curl -sI <site>/ | grep -i last-modified`.
 - Give counts per section (P/F/PE/not run). `rt build <code>` (or `rt tally <file>`) prints them and flags rows whose H is empty or only a status, and F rows without a bug id.
 - Give the data comparison coverage: cases exported, filled cells compared, number wrong.
 - Give the requirement coverage from "Ma trận bao phủ": rows with cases, rows not applicable, rows not covered and why.
-- List the main bugs, each with one concrete example.
+- List the main bugs, each with one concrete example, and the number of pictures in "Hình ảnh lỗi" (bugs with `Không có hình`, and why).
 - Say what could not be run and why.
 - Say what changed compared with the previous version.
 
 ## The builder script (`<workspace>/build_workbook.py`)
 
 ```python
-from reportkit import profile as P, workbook as W
+import os
+from reportkit import profile as P, workbook as W, evidence as E
 prof = P.load(); ws = prof.workspace("1E_117")
 wb = W.Workbook(prof, ws, name="Trang tổng hợp CBTT nội bộ", screen="[# 1E_117] ... - IDS > Trang chủ",
                 ticket="AI-23", ascii_name="TrangTongHopCongBoThongTinNoiBo", version=2)
@@ -133,7 +176,25 @@ wb.tc(purpose, steps, expected, basis="Căn cứ: ...", status="P", actual="conc
 wb.finish(run_date="dd/mm/yyyy", run_note="Thời gian: ...
 Người thực hiện: ...
 Bản build: ...")
-wb.sheet_svc(svc_rows, title, note); wb.sheet_bugs(bug_rows, title)
+wb.sheet_svc(svc_rows, title, note); wb.sheet_bugs(bug_rows, title)        # bug_rows: 7 values, column H comes next
+run = ws.latest_run(); shots = os.path.join(run, "shots")
+meta = dict(account="gms", env="ids-dev-gms.net", build="frontend cập nhật 05/10/2026 11:30",
+            screen="Trang chủ > Trang tổng hợp CBTT nội bộ")
+cards = [
+    E.card("BUG-01",              # title, severity, status, basis, cause: from 'Danh sách lỗi'
+           steps=["Đăng nhập gms, mở Trang tổng hợp CBTT nội bộ", "Năm = **2025**", "Rê chuột vào cột **Hạng A**"],
+           actual="Tooltip hiện **12** công ty", expected="**11** công ty: CTCP ABC (id 4101) đã xoá (DELETE_FLG = 1)",
+           panels=[E.run_shot(run, "U05", "Tooltip của cột Hạng A (khoanh đỏ)", mark=["tip"], show=["charts"]),
+                   E.table("Dữ liệu nguồn - SELECT chỉ đọc lúc 05/10/2026 14:48", ["COMPANY_PROFILE_ID", "Tên", "DELETE_FLG", "Vai trò"],
+                           [[4101, "CTCP ABC", 1, "Đã xoá - báo cáo vẫn đếm"]], roles=["bad"])], **meta),
+    E.card("BUG-04", steps=["Bấm **Xuất Excel**"], actual="Ô Vốn điều lệ **1234567890**", expected="**1,234,567,890**",
+           panels=[E.excel(os.path.join(shots, "U10_R104_TongHopCongTyKT.xlsx"), "File đã xuất, dòng 1-12",
+                           cells="A1:H12", bad=["F11"], extra={10: "Giá trị đúng", 11: "1,234,567,890"})],
+           captured="05/10/2026 14:52", **meta),        # no screenshot panel: give the time of the download
+]
+wb.sheet_evidence(cards, "HÌNH ẢNH MINH CHỨNG LỖI - [# 1E_117] ...",
+                  "Chụp 05/10/2026 14:40-14:55, bản build ... Tài khoản gms. Ảnh màn hình: Chromium 1440x900. ...",
+                  no_image={"BUG-09": "lỗi chỉ xảy ra khi máy chủ phản hồi chậm hơn 50 s, không thể hiện trên hình"})
 wb.sheet_details(W.details_from_run(ws.latest_run()) + extra_rows, title, note)
 wb.sheet_ba(ba_rows, title); wb.sheet_sources(rows, title, headers, widths)
 wb.sheet_coverage([

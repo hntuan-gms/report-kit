@@ -209,7 +209,9 @@ def cmd_build(a):
         cov_ok = _print_coverage(workbook.coverage_gate(out, ws.p("probe.json"), first, (prof.get("workbook.header_cells") or {}).get("code", "D3")))
         hid = workbook.hidden_rows(out, first)
         _out("hidden rows on the test case sheet (invisible in Excel): %s" % (hid or []))
-        ok = not bad and not f_no_bug and cov_ok and not hid
+        no_pic = workbook.evidence_gate(out)
+        _out("open bugs with no picture in 'Hình ảnh lỗi' and no 'Không có hình: <lý do>': %s" % (no_pic or []))
+        ok = not bad and not f_no_bug and cov_ok and not hid and not no_pic
         _out("quality gate: %s" % ("OK" if ok else "FAIL - fix the lines above, then bump version and rebuild"))
         ws.mark("build", file=out, counts=counts, gate_ok=ok)
 
@@ -263,6 +265,7 @@ def cmd_tally(a):
     counts, bad, f_no_bug = workbook.tally(a.file)
     _out("counts: %s\nrows with empty / status-only 'Kết quả hiện tại': %s\nF rows without bug id: %s" % (counts, bad, f_no_bug))
     _out("hidden rows on the test case sheet (invisible in Excel): %s" % (workbook.hidden_rows(a.file) or []))
+    _out("open bugs with no picture in 'Hình ảnh lỗi' and no 'Không có hình: <lý do>': %s" % (workbook.evidence_gate(a.file) or []))
     _print_coverage(workbook.coverage_gate(a.file, a.probe))
 
 

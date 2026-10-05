@@ -82,6 +82,7 @@ Mọi file làm việc nằm ở `~/report-kit-work/<hồ sơ>/<mã>/`, ngoài r
 | Đo sai im lặng | Không phát hiện | Tiền đề `ready` / `require` → NM "không đo được" |
 | Chạy lại phần hỏng | Viết thêm script | `rt check --redo` / `--only` |
 | Quy nguyên nhân ô lệch | Viết tay | `variants`: mỗi ô lệch ghi quy tắc giải thích nó; sheet chi tiết sinh tự động |
+| Hình minh chứng lỗi | Dựng tay từng hình theo file mẫu | `reportkit.evidence` + `wb.sheet_evidence`: thẻ minh chứng (bước, thực tế / mong đợi, ảnh khoanh đỏ, Excel ô sai tô đỏ, dữ liệu nguồn) sinh vào sheet "Hình ảnh lỗi", liên kết hai chiều với "Danh sách lỗi"; `rt build` chặn lỗi đang mở mà không có hình |
 | Đăng nhập | Lỗi `networkidle`, khớp URL sớm | Đã sửa; tự đăng nhập lại khi phiên hết hạn |
 | Dự án khác | Sửa code | Viết hồ sơ `.report-kit/`; lõi không chứa gì riêng của dự án |
 

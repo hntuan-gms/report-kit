@@ -22,6 +22,7 @@ and judges them against the SRS / standard (the kit only records what the screen
       - offline: true
       - reload: true
       - screenshot: after_click
+      - screenshot: {name: bug_grid, selector: "table", highlight: ["tbody tr:nth-child(1) td:nth-child(9)"], pad: 12}
     observe:                            # recorded at the end
       titles: {texts: ".apexcharts-title-text"}
       charts: {count: "apx-chart svg"}
@@ -29,13 +30,52 @@ and judges them against the SRS / standard (the kit only records what the screen
       toasts: toasts
       overflow: {js: "()=>document.documentElement.scrollWidth>window.innerWidth+2"}
     require: {tip: {regex: "^Hạng A"}}  # preconditions on observations, else NM
+    boxes: {filters: ".filter-panel", grid: "table"}   # optional; areas whose position is recorded with the final
+                                        # screenshot (every observation with a selector is recorded too) -> E.run_shot
 
 Observation kinds: text, texts, count, attr {selector, name}, value, js, requests, toasts, url.
 """
+import json
 import os
 import re
 
 from .. import http
+
+_BOXES_JS = ("(els,n)=>els.slice(0,n).map(e=>{const r=e.getBoundingClientRect();"
+             "return [Math.round(r.x+scrollX),Math.round(r.y+scrollY),Math.round(r.width),Math.round(r.height)]})"
+             ".filter(b=>b[2]>0&&b[3]>0)")
+
+
+def _selectors(check):
+    """{name: selector} of what the entry looked at: every observation with a selector + the entry's `boxes:`."""
+    out = {}
+
+    def add(specs):
+        for name, spec in (specs or {}).items():
+            if isinstance(spec, dict):
+                kind, arg = next(iter(spec.items()))
+                sel = arg.get("selector") if isinstance(arg, dict) else arg if kind in ("text", "texts", "count", "value") else None
+                if isinstance(sel, str):
+                    out[name] = sel
+    add(check.get("observe"))
+    for s in check.get("steps", []) or []:
+        if isinstance(s, dict) and "observe" in s:
+            add(s["observe"])
+    out.update(check.get("boxes") or {})
+    return out
+
+
+def _boxes(pg, sels, limit=60):
+    """Page coordinates (= pixels of a full-page screenshot) of up to `limit` matches of each selector."""
+    out = {}
+    for name, sel in sels.items():
+        try:
+            b = pg.eval_on_selector_all(sel, _BOXES_JS, limit)
+        except Exception:
+            continue
+        if b:
+            out[name] = b
+    return out
 
 
 def _obs(pg, name, spec, st):
@@ -104,6 +144,37 @@ def _route(pg, r):
         pg.route(r["pattern"], lambda route: route.fulfill(status=status, body=body, content_type=ctype))
 
 
+_HL_ON = "e=>{e.dataset.rkHl=e.style.outline||' ';e.style.outline='3px solid #D92D20';e.style.outlineOffset='1px'}"
+_HL_OFF = "()=>document.querySelectorAll('[data-rk-hl]').forEach(e=>{e.style.outline=e.dataset.rkHl.trim();e.style.outlineOffset='';delete e.dataset.rkHl})"
+
+
+def _screenshot(pg, spec, st, shots):
+    """screenshot: name                                   full page
+       screenshot: {name, selector, highlight, pad}       the area of `selector` (+ pad px), with every `highlight`
+                                                          element outlined in red (str / {selector, nth} / {selector, all: true});
+                                                          the outline is removed right after the capture."""
+    for h in spec.get("highlight") or []:
+        if isinstance(h, dict) and h.get("all"):
+            pg.locator(h["selector"]).evaluate_all("els=>els.forEach(%s)" % _HL_ON)
+        else:
+            _loc(pg, h).evaluate(_HL_ON)
+    p = os.path.join(shots, "%s_%s.png" % (st["id"], spec["name"]))
+    with open(p + ".json", "w", encoding="utf-8") as f:          # read by reportkit.evidence: the picture is marked
+        json.dump({"highlighted": len(spec.get("highlight") or [])}, f)
+    try:
+        if spec.get("selector"):
+            loc = _loc(pg, spec["selector"]); loc.scroll_into_view_if_needed()
+            bb, pad = loc.bounding_box(), int(spec.get("pad", 12))
+            sx, sy = pg.evaluate("()=>[window.scrollX, window.scrollY]")
+            pg.screenshot(path=p, full_page=True, clip={"x": max(0, bb["x"] + sx - pad), "y": max(0, bb["y"] + sy - pad),
+                                                         "width": bb["width"] + 2 * pad, "height": bb["height"] + 2 * pad})
+        else:
+            pg.screenshot(path=p, full_page=spec.get("full_page", True))
+    finally:
+        pg.evaluate(_HL_OFF)
+    st["obs"].setdefault("screenshots", []).append(p)
+
+
 def _step(pg, step, st, shots):
     kind, arg = next(iter(step.items()))
     profile = st["profile"]
@@ -155,8 +226,7 @@ def _step(pg, step, st, shots):
         except Exception as e:
             st["obs"][name] = {"downloaded": False, "error": str(e).splitlines()[0][:150], "calls": st["calls"][n0:]}
     elif kind == "screenshot":
-        p = os.path.join(shots, "%s_%s.png" % (st["id"], arg)); pg.screenshot(path=p, full_page=True)
-        st["obs"].setdefault("screenshots", []).append(p)
+        _screenshot(pg, arg if isinstance(arg, dict) else {"name": arg}, st, shots)
     elif kind == "observe":
         for name, spec in arg.items():
             st["obs"][name] = _obs(pg, name, spec, st)
@@ -208,7 +278,9 @@ def run(profile, system, check, browser, run_dir):
             _step(pg, s, st, shots)
         for name, spec in (check.get("observe") or {}).items():
             st["obs"][name] = _obs(pg, name, spec, st)
-        final = os.path.join(shots, "%s_final.png" % check["id"]); pg.screenshot(path=final, full_page=True)
+        final = os.path.join(shots, "%s_final.png" % check["id"])
+        res["boxes"] = {"shot": final, "boxes": _boxes(pg, _selectors(check))}   # E.run_shot crops / outlines from these
+        pg.screenshot(path=final, full_page=True)
         st["obs"].setdefault("screenshots", []).append(final)
         pre = check_all(st["obs"], check.get("require"))
         if pre:

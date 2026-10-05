@@ -182,3 +182,69 @@ def test_siblings_share_srs_or_code(tmp_path):
     assert [s["code"] for s in sibs] == ["1E_117", "2E_50"]
     assert any("cùng SRS" in w for w in sibs[0]["why"]) and any("3/3" in w for w in sibs[0]["why"])
     assert inputs.find_siblings(prof, "1E_119", inputs.find_function(prof, "1E_119")) == []
+
+
+def _tiny_png(path, w=4, h=3):
+    import struct, zlib
+    raw = b"".join(b"\x00" + b"\xff\x00\x00" * w for _ in range(h))
+    chunk = lambda t, d: struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+                     + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+    return str(path)
+
+
+def test_evidence_sheet_links_and_gate(tmp_path):
+    from reportkit import evidence as E, workbook as W
+    prof = _mini_profile(tmp_path); ws = prof.workspace("X_1")
+    png = _tiny_png(tmp_path / "s.png")
+    wb = W.Workbook(prof, ws, name="n", screen="s", ticket="T", ascii_name="N")
+    wb.chapter("Chức năng 1"); wb.tc("Kiểm tra A", "1.", "kq A", status="F", actual="thấy A sai", bug="BUG-01")
+    wb.sheet_bugs([("BUG-01", "Cao", "Mở", "m", "c", "n", "b"), ("BUG-02", "Thấp", "Mở", "m", "c", "n", "b"),
+                   ("BUG-03", "Thấp", "Mở", "m", "c", "n", "b"), ("BUG-04", "Thấp", "Rút lại", "m", "c", "n", "b")], "t")
+    mk = lambda bug: E.card(bug, ["bước 1"], "**sai**", "đúng", [E.shot(png, "ảnh")])
+    cards = [mk("BUG-01"), mk("BUG-01"), mk("BUG-02")]
+    for c in cards:
+        c["png"] = png                                   # pre-rendered: no browser needed
+    with pytest.raises(ValueError):
+        wb.sheet_evidence([mk("BUG-99")], "t", "n")      # bug not in 'Danh sách lỗi'
+    wb.sheet_evidence(cards, "t", "n")
+    assert [c["part"] for c in cards] == ["1/2", "2/2", ""]
+    assert cards[0]["title"] == "m" and cards[0]["severity"] == "Cao" and cards[0]["basis"] == "c" and cards[0]["cause"] == "n"
+    assert cards[0]["status"] == "Mở - còn lỗi " + cards[0]["captured"][:5]          # from the bug row + picture date
+    out = wb.save()
+    book = openpyxl.load_workbook(out)
+    assert book.sheetnames.index(W.EVIDENCE_SHEET) == book.sheetnames.index("Danh sách lỗi") + 1
+    b = book["Danh sách lỗi"]
+    assert b["H5"].value == "Xem hình BUG-01 (1/2) (+1 hình tiếp theo)" and b["H5"].hyperlink.location.endswith("!B4")
+    assert W.evidence_gate(out) == ["BUG-03"]            # BUG-04 is withdrawn
+
+
+def test_evidence_excel_panel_shows_file_formats(tmp_path):
+    from reportkit import evidence as E
+    x = openpyxl.Workbook(); sh = x.active
+    sh["A1"] = 1234567.5; sh["A1"].number_format = "#,##0.00"; sh["B1"] = 1234567
+    p = tmp_path / "f.xlsx"; x.save(p)
+    doc = E._excel_html(E.excel(str(p), "cap", bad=["B1"], extra={1: "1,234,567"}))
+    assert "1,234,567.50" in doc and ">1234567<" in doc and 'class="bad"' in doc and 'class="extra"' in doc
+    with pytest.raises(ValueError):
+        E.card("BUG-01", ["s"], "a", "e", [E.text("api", "500")])        # no screenshot -> captured required
+    with pytest.raises(ValueError):
+        E.text("api", "GET /x\nAuthorization: Bearer abcdefghijklmnop")      # credentials never go in a picture
+    E.text("api", "HTTP 500: ORA-00904 invalid identifier")
+
+
+def test_evidence_run_shot_and_lint(tmp_path):
+    import json
+    from reportkit import evidence as E
+    png = _tiny_png(tmp_path / "U07_final.png", w=200, h=100)
+    (tmp_path / "U07.json").write_text(json.dumps({"id": "U07", "boxes": {"shot": png, "boxes": {
+        "grid": [[10, 20, 100, 50]], "cells": [[30, 30, 10, 5], [60, 30, 10, 5]]}}}), encoding="utf-8")
+    p = E.run_shot(str(tmp_path), "U07", "cap", mark=["cells#1"], show=["grid"], pad=5)
+    assert p["crop"] == (5, 15, 110, 60) and p["boxes"] == [[60, 30, 10, 5]]
+    with pytest.raises(ValueError):
+        E.run_shot(str(tmp_path), "U07", "cap", mark=["nope"])
+    c = E.card("BUG-01", ["s"], "a", "e", [E.shot(png, "cap")], title="t", status="Mở", captured="01/01/2020 10:00")
+    w = E.lint(c, today="05/10/2026")
+    assert any("đánh dấu" in x for x in w) and any("hôm nay" in x for x in w)
+    c = E.card("BUG-01", ["s"], "a", "e", [p], title="t", status="Mở", captured="05/10/2026 10:00")
+    assert E.lint(c, today="05/10/2026") == []

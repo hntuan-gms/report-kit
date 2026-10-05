@@ -11,8 +11,9 @@ Same API as the original build_workbook.py - Claude writes a short builder scrip
     wb.tc("Kiểm tra ...", "1. ...", "Kết quả mong muốn", basis="Căn cứ: ...", status="P",
           actual="Điều thực tế đã xảy ra, có giá trị cụ thể", bug="BUG-01")
     wb.finish(run_date="28/09/2026", run_note="Thời gian: ...\\nNgười thực hiện: ...\\nBản build: ...")
-    wb.sheet_svc(rows, title, note); wb.sheet_bugs(rows, title); wb.sheet_details(rows, title, note)
-    wb.sheet_ba(rows, title); wb.sheet_sources(rows, title, headers, widths)
+    wb.sheet_svc(rows, title, note); wb.sheet_bugs(rows, title)
+    wb.sheet_evidence(cards, title, note, no_image={...})          # 'Hình ảnh lỗi', cards from reportkit.evidence
+    wb.sheet_details(rows, title, note); wb.sheet_ba(rows, title); wb.sheet_sources(rows, title, headers, widths)
     wb.sheet_coverage([(source, item, requirement, ["Kiểm tra ..."], note), ...], title)   # 'Ma trận bao phủ'
     wb.save()
 
@@ -28,12 +29,15 @@ Profile block (defaults shown are the KBKT template):
     font: "Times New Roman"
 """
 import copy
+import math
 import os
 
 import openpyxl
 from openpyxl.comments import Comment
+from openpyxl.drawing.image import Image as _XlImage
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.worksheet.hyperlink import Hyperlink
 
 GREEN = PatternFill("solid", fgColor="FFC6EFCE"); RED = PatternFill("solid", fgColor="FFFFC7CE")
 YELLOW = PatternFill("solid", fgColor="FFFFEB9C"); GREY = PatternFill("solid", fgColor="FFE7E6E6")
@@ -44,7 +48,12 @@ _thin = Side(style="thin"); BORDER = Border(left=_thin, right=_thin, top=_thin, 
 SVC_HEADERS = ["STT", "Hạng mục", "SRS mô tả", "Code thực tế (vị trí file:line)", "Hiện trạng dữ liệu / kết quả chạy DEV", "Loại",
                "Mức độ", "Đề xuất cập nhật SRS", "Đề xuất cho DEV", "Quy chuẩn chung (đã chốt với BA)", "Trạng thái sau Quy chuẩn",
                "BA xác nhận", "DEV xác nhận", "Kết luận"]
-BUG_HEADERS = ["Mã lỗi", "Mức độ", "Trạng thái", "Mô tả", "Căn cứ", "Nguyên nhân (code)", "Bằng chứng / tái hiện"]
+BUG_HEADERS = ["Mã lỗi", "Mức độ", "Trạng thái", "Mô tả", "Căn cứ", "Nguyên nhân (code)", "Bằng chứng / tái hiện",
+               "Hình ảnh minh chứng"]           # last column filled by sheet_evidence()
+BUG_NOTE = ('Hình minh chứng của từng lỗi ở sheet "Hình ảnh lỗi" (bấm vào ô cột H). Mỗi hình gồm: các bước tái hiện, '
+            "kết quả thực tế / mong đợi, ảnh màn hình (vùng sai khoanh đỏ), file Excel đã xuất (ô sai tô đỏ) và dữ liệu nguồn khi cần.")
+EVIDENCE_SHEET = "Hình ảnh lỗi"
+NO_IMAGE = "Không có hình:"                    # 'Hình ảnh minh chứng' of a bug that cannot be pictured: + the reason
 DETAIL_HEADERS = ["Khoá (công ty / kỳ / dòng)", "Cột", "Chỉ tiêu / trường", "Giá trị trên báo cáo", "Giá trị mong đợi", "Nguồn gây sai", "Mã lỗi"]
 BA_HEADERS = ["STT", "Chủ đề", "Câu hỏi", "Mức độ", "Trạng thái", "Trả lời / căn cứ"]
 COV_SHEET = "Ma trận bao phủ"
@@ -114,6 +123,7 @@ class Workbook(object):
     def __init__(self, prof, ws, name, screen, ticket="", ascii_name="", version=1, out=None, sheet_title=None):
         cfg = prof.get("workbook", {}) or {}
         self.cfg = cfg
+        self.space = ws
         tpl = prof.expand(cfg.get("template", "{tools_dir}/Template Testcase/KBKT_Template.xlsx"))
         if not os.path.exists(tpl):
             raise SystemExit("Workbook template not found: %s (profile workbook.template)" % tpl)
@@ -265,11 +275,83 @@ class Workbook(object):
         dv.add("L5:M%d" % (4 + len(data))); s.add_data_validation(dv)
         return s
 
-    def sheet_bugs(self, rows, title):
-        s = self.table("Danh sách lỗi", title, BUG_HEADERS, rows, [9, 12, 22, 46, 34, 46, 56])
+    def sheet_bugs(self, rows, title, note=BUG_NOTE):
+        """rows: tuples in BUG_HEADERS order without the last column (7 values) - sheet_evidence() fills 'Hình ảnh minh chứng'."""
+        s = self.table("Danh sách lỗi", title, BUG_HEADERS, rows, [9, 12, 22, 46, 34, 46, 56, 30], note)
         for r in range(5, 5 + len(rows)):
             st = str(s.cell(r, 3).value or "")
             s.cell(r, 3).fill = GREY if st.startswith(("Rút", "Đã đóng")) else (RED if st in ("Mở", "Mới") else YELLOW)
+        return s
+
+    def sheet_evidence(self, cards, title, note, no_image=None, out_dir=None, width_px=1000):
+        """'Hình ảnh lỗi': one picture per card (reportkit.evidence.card), placed right after 'Danh sách lỗi', each with a
+        title bar and a link back; 'Danh sách lỗi' column H links to the first picture of each bug.
+
+        note      when the pictures were taken, build, accounts, browser size, what was hidden to keep a picture short
+        no_image  {bug: reason} for a bug no picture can show (written as 'Không có hình: <reason>'); every other open
+                  bug without a card fails `rt build`
+        Empty title / severity / status / basis / cause of a card come from its row here (evidence.fill_from_bugs).
+        Cards are rendered to <workspace>/evidence/ (PNG + HTML) unless they already carry 'png'; one line per card is
+        printed with the lint warnings. Call after sheet_bugs().
+        """
+        from . import evidence as E
+        if "Danh sách lỗi" not in self.wb.sheetnames:
+            raise ValueError("call sheet_bugs() before sheet_evidence()")
+        bugs = self.wb["Danh sách lỗi"]
+        bug_row = {str(bugs.cell(r, 1).value).strip(): r for r in range(5, bugs.max_row + 1) if bugs.cell(r, 1).value}
+        no_image = dict(no_image or {})
+        unknown = sorted(({c["bug"] for c in cards} | set(no_image)) - set(bug_row))
+        if unknown:
+            raise ValueError("evidence for bugs that are not in 'Danh sách lỗi': %s" % unknown)
+        both = sorted({c["bug"] for c in cards} & set(no_image))
+        if both:
+            raise ValueError("bugs both with a card and in no_image: %s" % both)
+        empty = [b for b, why in no_image.items() if not str(why or "").strip()]
+        if empty:
+            raise ValueError("no_image needs the reason for: %s" % empty)
+        E.number(cards)
+        val = lambda r, c: str(bugs.cell(r, c).value or "").strip()
+        E.fill_from_bugs(cards, {b: {"severity": val(r, 2), "status": val(r, 3), "title": val(r, 4), "basis": val(r, 5),
+                                     "cause": val(r, 6)} for b, r in bug_row.items()})
+        if any("png" not in c for c in cards):
+            E.render(cards, out_dir or self.space.p("evidence", "x")[:-2])
+        s = self.wb.create_sheet(EVIDENCE_SHEET)
+        s.sheet_view.showGridLines = False
+        s.column_dimensions["A"].width = 2
+        set_text(s["B1"], title).font = Font(name=self.FONT.name, size=14, bold=True)
+        s.merge_cells("B2:P2")
+        c2 = set_text(s["B2"], note); c2.font = Font(name=self.FONT.name, size=11, italic=True)
+        c2.alignment = Alignment(wrap_text=True, vertical="top")
+        s.row_dimensions[2].height = max(30, 15 * (1 + len(str(note)) // 170) + 6)
+        r, first = 4, {}
+        for c in cards:
+            w, h = E.png_size(c["png"])
+            dh = int(round(h * width_px / float(w)))
+            s.merge_cells(start_row=r, start_column=2, end_row=r, end_column=16)
+            head = "%s%s - %s  [%s]" % (c["bug"], (" (%s)" % c["part"]) if c["part"] else "", c["title"], c["status"])
+            t = set_text(s.cell(r, 2), head)
+            t.font = Font(name=self.FONT.name, size=12, bold=True, color="FFFFFFFF")
+            t.fill = PatternFill("solid", fgColor="FF667085" if str(c["status"]).startswith(E.WITHDRAWN) else "FFB42318")
+            t.alignment = Alignment(vertical="center")
+            s.row_dimensions[r].height = 19.5
+            back = s.cell(r + 1, 2, "↩ Về Danh sách lỗi (%s)" % c["bug"])
+            back.hyperlink = Hyperlink(ref=back.coordinate, location="'Danh sách lỗi'!A%d" % bug_row[c["bug"]])
+            back.font = Font(name=self.FONT.name, size=11, color="FF0563C1", underline="single")
+            img = _Png(c["png"]); img.width, img.height = width_px, dh; img.anchor = "B%d" % (r + 2)
+            s.add_image(img)
+            row0, n = first.get(c["bug"], (r, 0)); first[c["bug"]] = (row0, n + 1)
+            r += 2 + int(math.ceil(dh / 20.0)) + 2          # default row = 15 pt = 20 px
+        hcol = BUG_HEADERS.index("Hình ảnh minh chứng") + 1
+        for b, rr in bug_row.items():
+            cell = bugs.cell(rr, hcol); cell.border = BORDER; cell.alignment = Alignment(wrap_text=True, vertical="top")
+            if b in first:
+                row0, n = first[b]
+                set_text(cell, "Xem hình %s%s" % (b, (" (1/%d) (+%d hình tiếp theo)" % (n, n - 1)) if n > 1 else ""))
+                cell.hyperlink = Hyperlink(ref=cell.coordinate, location="'%s'!B%d" % (EVIDENCE_SHEET, row0))
+                cell.font = Font(name=self.FONT.name, size=12, color="FF0563C1", underline="single")
+            elif b in no_image:
+                set_text(cell, "%s %s" % (NO_IMAGE, no_image[b])).font = self.FONT
+        self.wb.move_sheet(s, offset=self.wb.sheetnames.index("Danh sách lỗi") + 1 - self.wb.sheetnames.index(s.title))
         return s
 
     def sheet_details(self, rows, title, note, headers=None, widths=None):
@@ -316,6 +398,45 @@ def details_from_run(run_dir, causes=None, labels=None):
                 rows.append(("%s %s%s" % (r["id"], period + " / " if period else "", key or "-"), m["field"],
                              labels.get(r["id"], r.get("title")), str(m["actual"]), str(m["expected"]), cause, bug))
     return rows
+
+
+class _Png(_XlImage):
+    """openpyxl image without Pillow: the kit only embeds the PNG cards it rendered.
+    Without Pillow, openpyxl drops every image when it LOADS a workbook - never patch a delivered workbook that has
+    pictures with load_workbook() + save(): rebuild it from build_workbook.py."""
+
+    def __init__(self, path):
+        from .evidence import png_size
+        self.ref = path
+        self.width, self.height = png_size(path)
+        self.format = "png"
+
+    def _data(self):
+        with open(self.ref, "rb") as f:
+            return f.read()
+
+
+def evidence_gate(path):
+    """Quality gate on the pictures: bugs of 'Danh sách lỗi' whose status is not 'Rút…' / 'Đã đóng' and whose
+    'Hình ảnh minh chứng' neither links to 'Hình ảnh lỗi' nor says 'Không có hình: <lý do>'."""
+    from .evidence import WITHDRAWN
+    wb = openpyxl.load_workbook(path)
+    if "Danh sách lỗi" not in wb.sheetnames:
+        return []
+    b = wb["Danh sách lỗi"]
+    hdr = [b.cell(4, c).value for c in range(1, b.max_column + 1)]
+    hcol = hdr.index("Hình ảnh minh chứng") + 1 if "Hình ảnh minh chứng" in hdr else None
+    missing = []
+    for r in range(5, b.max_row + 1):
+        bug = str(b.cell(r, 1).value or "").strip()
+        if not bug.startswith("BUG") or str(b.cell(r, 3).value or "").startswith(WITHDRAWN):
+            continue
+        cell = b.cell(r, hcol) if hcol else None
+        val = str(cell.value or "").strip() if cell is not None else ""
+        linked = cell is not None and cell.hyperlink is not None and bool(cell.hyperlink.location)
+        if not (linked or (val.startswith(NO_IMAGE) and len(val) > len(NO_IMAGE) + 3)):
+            missing.append(bug)
+    return missing
 
 
 def _case_id(sh, hdr, code, r):
