@@ -2,7 +2,7 @@
 
   rt init                      create .report-kit/ (profile skeleton) in the current project
   rt doctor [--db]             check Python packages, browser, profile, secrets, web reachability (DB only with --db)
-  rt start <code>              find the function, dump SRS / standard / previous workbook, trace the code -> brief.md
+  rt start <code> [--route R]  find the function, dump standard / previous workbook, trace the code from the menu -> brief.md
   rt login [--system S]        log in through the real SSO page, save the session
   rt probe <code> [--tables]   run the profile's data traps on the report's tables -> probe.md
   rt check <code> [--only ids] [--redo] [--kind data|ui]    run checks.yaml -> runs/<id>/summary.md
@@ -99,12 +99,6 @@ def cmd_start(a):
     fn = inputs.find_function(prof, code)
     with open(ws.p("inputs", "function.json"), "w", encoding="utf-8") as f:
         json.dump(fn, f, ensure_ascii=False, indent=1, default=str)
-    srs_files = inputs.find_srs(prof, code, fn.get("srs"))
-    srs_text, srs_out, images = "", [], []
-    for i, p in enumerate(srs_files):
-        out = ws.p("inputs", "srs_%d.txt" % (i + 1))
-        text, imgs = inputs.dump_any(p, out, images_dir=ws.p("inputs", "srs_%d_images" % (i + 1), "x")[:-2])
-        srs_text += "\n" + text; srs_out.append((p, out, len(text))); images += imgs
     std_doc, std_sum = inputs.find_standard(prof)
     std_out = None
     if std_doc:
@@ -115,18 +109,23 @@ def cmd_start(a):
         out = ws.p("inputs", "prev_" + os.path.splitext(os.path.basename(p))[0] + ".txt")
         text, _ = inputs.dump_any(p, out)
         prev_out.append((p, out, text.count("##### COMMENT")))
-    t = locate.locate(prof, ws, srs_text, name=fn.get("name"), force=a.retrace)
+    t = locate.locate(prof, ws, fn, route=a.route, force=a.retrace or bool(a.route))
     L = ["# Brief %s - %s" % (code, fn.get("name") or ""),
-         "- system: %s (%s) | jira: %s | ticket: %s | PIC: %s" % (fn.get("system_key"), fn.get("system"), fn.get("jira"), fn.get("ticket"), fn.get("pic")),
-         "- workspace: %s" % ws.dir, "", "## Inputs"]
-    L += ["- SRS: %s -> %s (%d chars)" % s for s in srs_out] or ["- SRS: NOT FOUND - ask the user"]
-    L.append("- SRS images (%d): %s" % (len(images), ", ".join(images)) if images else "- SRS images: none")
+         "- system: %s (%s) | jira: %s | ticket: %s | PIC: %s | status: %s" % (
+             fn.get("system_key"), fn.get("system"), fn.get("jira"), fn.get("ticket") or "UNKNOWN - ask the user",
+             fn.get("pic"), fn.get("status")),
+         "- menu: %s" % (" >> ".join(inputs.menu_path(fn)) or "not given in the function list - find it in the code"),
+         "- workspace: %s" % ws.dir]
+    notes = [(k, fn.get(k)) for k in ("description", "note_tester", "note_ba", "replace") if fn.get(k)]
+    if notes:
+        L += ["", "## Function list notes"] + ["- %s: %s" % (k, " ".join(str(v).split())) for k, v in notes]
+    L += ["", "## Inputs"]
     L.append("- standard: %s" % (("%s -> %s" % (std_doc, std_out)) if std_doc else "document not found; profile summary %s" % std_sum))
     L += ["- previous workbook: %s -> %s (%d reviewer comments)" % x for x in prev_out] or ["- previous workbook: none"]
     sibs = inputs.find_siblings(prof, code, fn, trace=t, workspaces_root=os.path.dirname(ws.dir))
     if sibs:
-        L += ["", "## Sibling reports - SAME SRS OR SAME CODE: test the difference, don't copy",
-              "These functions share this one's SRS or its main code files, so they are probably the same screen for another",
+        L += ["", "## Sibling reports - SAME SCREEN OR SAME CODE: test the difference, don't copy",
+              "These functions share this one's screen or its main code files, so they are probably the same screen for another",
               "kind of user or another filter. Before writing a case, find out what differs (account type, data scope, filter) and",
               "ask for the account / data that shows it. Shared behaviour: cite the sibling's case instead of copying it, unless",
               "it is re-run with what makes this report different.", ""]
@@ -138,7 +137,7 @@ def cmd_start(a):
     brief = "\n".join(L)
     with open(ws.p("brief.md"), "w", encoding="utf-8") as f:
         f.write(brief)
-    ws.mark("start", srs=[s[0] for s in srs_out], std=std_doc, prev=[x[0] for x in prev_out], siblings=[s["code"] for s in sibs])
+    ws.mark("start", std=std_doc, prev=[x[0] for x in prev_out], siblings=[s["code"] for s in sibs], trace=t.get("method"))
     _out(brief)
 
 
@@ -161,11 +160,10 @@ def cmd_probe(a):
             raise SystemExit("Run `rt start %s` first or pass --tables" % a.code)
         with open(tp, encoding="utf-8") as f:
             t = json.load(f)
-        ids = set(t["fingerprints"]["identifiers"])
-        objs = {o for x in t["top"][:8] for o in x["sql_objects"]}
+        objs = set(t.get("sql_objects") or []) | {o for x in t["top"][:8] for o in x.get("sql_objects", [])}
         from . import db
         known = set(db.tables(prof, a.schema))
-        tables = sorted((ids | objs) & known)
+        tables = sorted(objs & known)
     out = probe.probe(prof, ws, tables, a.schema)
     md = probe.probe_md(out)
     with open(ws.p("probe.md"), "w", encoding="utf-8") as f:
@@ -289,7 +287,8 @@ def main(argv=None):
     sp = ap.add_subparsers(dest="cmd", required=True)
     x = sp.add_parser("init"); x.add_argument("--name"); x.set_defaults(f=cmd_init)
     x = sp.add_parser("doctor"); x.add_argument("--db", action="store_true", help="also connect to the DB (needs the user's OK)"); x.set_defaults(f=cmd_doctor)
-    x = sp.add_parser("start"); x.add_argument("code"); x.add_argument("--retrace", action="store_true"); x.set_defaults(f=cmd_start)
+    x = sp.add_parser("start"); x.add_argument("code"); x.add_argument("--retrace", action="store_true")
+    x.add_argument("--route", help="the screen's route (e.g. /statistics/x/y) when the menu path can't be matched"); x.set_defaults(f=cmd_start)
     x = sp.add_parser("login"); x.add_argument("--system", action="append"); x.add_argument("--type"); x.add_argument("--force", action="store_true"); x.set_defaults(f=cmd_login)
     x = sp.add_parser("probe"); x.add_argument("code"); x.add_argument("--tables"); x.add_argument("--schema", default="default"); x.set_defaults(f=cmd_probe)
     x = sp.add_parser("check"); x.add_argument("code"); x.add_argument("--only"); x.add_argument("--redo", action="store_true")

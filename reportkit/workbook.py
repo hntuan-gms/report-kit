@@ -11,7 +11,7 @@ Same API as the original build_workbook.py - Claude writes a short builder scrip
     wb.tc("Kiểm tra ...", "1. ...", "Kết quả mong muốn", basis="Căn cứ: ...", status="P",
           actual="Điều thực tế đã xảy ra, có giá trị cụ thể", bug="BUG-01")
     wb.finish(run_date="28/09/2026", run_note="Thời gian: ...\\nNgười thực hiện: ...\\nBản build: ...")
-    wb.sheet_svc(rows, title, note); wb.sheet_bugs(rows, title)
+    wb.sheet_rules(rows, title, note); wb.sheet_bugs(rows, title)   # 'Quy tắc nghiệp vụ', 'Danh sách lỗi'
     wb.sheet_evidence(cards, title, note, no_image={...})          # 'Hình ảnh lỗi', cards from reportkit.evidence
     wb.sheet_details(rows, title, note); wb.sheet_ba(rows, title); wb.sheet_sources(rows, title, headers, widths)
     wb.sheet_coverage([(source, item, requirement, ["Kiểm tra ..."], note), ...], title)   # 'Ma trận bao phủ'
@@ -45,9 +45,10 @@ BLUE = PatternFill("solid", fgColor="FFDDEBF7"); HEADER = PatternFill("solid", f
 STATUS_FILL = {"P": GREEN, "F": RED, "PE": YELLOW}
 _thin = Side(style="thin"); BORDER = Border(left=_thin, right=_thin, top=_thin, bottom=_thin)
 
-SVC_HEADERS = ["STT", "Hạng mục", "SRS mô tả", "Code thực tế (vị trí file:line)", "Hiện trạng dữ liệu / kết quả chạy DEV", "Loại",
-               "Mức độ", "Đề xuất cập nhật SRS", "Đề xuất cho DEV", "Quy chuẩn chung (đã chốt với BA)", "Trạng thái sau Quy chuẩn",
-               "BA xác nhận", "DEV xác nhận", "Kết luận"]
+RULE_SHEET = "Quy tắc nghiệp vụ"
+RULE_HEADERS = ["STT", "Hạng mục", "Quy tắc hệ thống áp dụng", "Vị trí trong code (file:line)", "Kết quả chạy trên môi trường",
+                "Quy chuẩn chung liên quan", "Đánh giá", "Mã lỗi / case", "Ghi chú", "DEV xác nhận"]
+RULE_VERDICTS = {"Đúng": GREEN, "Lỗi": RED, "Lưu ý": YELLOW}
 BUG_HEADERS = ["Mã lỗi", "Mức độ", "Trạng thái", "Mô tả", "Căn cứ", "Nguyên nhân (code)", "Bằng chứng / tái hiện",
                "Hình ảnh minh chứng"]           # last column filled by sheet_evidence()
 BUG_NOTE = ('Hình minh chứng của từng lỗi ở sheet "Hình ảnh lỗi" (bấm vào ô cột H). Mỗi hình gồm: các bước tái hiện, '
@@ -59,8 +60,8 @@ BA_HEADERS = ["STT", "Chủ đề", "Câu hỏi", "Mức độ", "Trạng thái"
 COV_SHEET = "Ma trận bao phủ"
 COV_HEADERS = ["STT", "Nguồn", "Mục", "Yêu cầu / quy tắc", "Case", "Kết quả các case (Lần 1)", "Ghi chú"]
 COV_REASONS = ("Không áp dụng", "Chưa phủ")          # a row with no case must start its note with one of these
-COV_NOTE = ("Mỗi dòng của SRS, Quy chuẩn chung, code, bẫy dữ liệu (rt probe) và checklist trỏ tới case kiểm tra nó. "
-            "Case '-' là mục không áp dụng hoặc chưa phủ (lý do ở Ghi chú). Mã case theo cột A của sheet test case.")
+COV_NOTE = ("Mỗi quy tắc nghiệp vụ của chức năng, mục Quy chuẩn chung, bẫy dữ liệu (rt probe) và mục checklist trỏ tới case "
+            "kiểm tra nó. Case '-' là mục không áp dụng hoặc chưa phủ (lý do ở Ghi chú). Mã case theo cột A của sheet test case.")
 
 
 def set_text(cell, value):
@@ -206,8 +207,8 @@ class Workbook(object):
         """'Ma trận bao phủ': one row per requirement, pointing at the cases that test it.
 
         rows: (source, item, requirement, case_keys, note)
-          source  'SRS sheet 2' / 'Quy chuẩn chung' / 'Code' / 'Bẫy dữ liệu (rt probe)' / 'Checklist test-areas' / ...
-          item    the SRS cell, standard section, file:line, trap id (as probe.md prints it) or checklist item
+          source  'Quy tắc nghiệp vụ' / 'Quy chuẩn chung' / 'Bẫy dữ liệu (rt probe)' / 'Checklist' / ...
+          item    the rule (as in 'Quy tắc nghiệp vụ'), standard section, trap id (as probe.md prints it) or checklist item
           case_keys  beginnings of the cases' 'Mục đích' (each must match at least one case, or ValueError)
           note    required when case_keys is empty, and must then start with 'Không áp dụng' or 'Chưa phủ' + the reason
         Case ids and the P/F/PE tally are filled in from the test case sheet.
@@ -261,18 +262,22 @@ class Workbook(object):
         fit_rows(s, range(4, 5 + len(rows)))
         return s
 
-    def sheet_svc(self, rows, title, note):
-        """rows: tuples in SVC_HEADERS order without STT and without the 3 review columns (10 values)."""
-        data = [(i + 1,) + tuple(r) + ("", "", "") for i, r in enumerate(rows)]
-        s = self.table("So sánh SRS - Code", title, SVC_HEADERS, data, [5, 24, 32, 46, 40, 16, 10, 30, 28, 40, 34, 14, 14, 16], note)
+    def sheet_rules(self, rows, title, note):
+        """'Quy tắc nghiệp vụ': one row per rule the report applies (data scope, filters, calculations, display).
+
+        rows: tuples in RULE_HEADERS order without STT and without 'DEV xác nhận' (8 values):
+          (hạng mục, quy tắc, file:line, kết quả chạy, Quy chuẩn § or '-', đánh giá, BUG-xx / case ids, ghi chú)
+        'Đánh giá' is one of RULE_VERDICTS: Đúng (green), Lỗi (red), Lưu ý (yellow).
+        """
+        bad = [r[0] for r in rows if len(r) != 8 or r[5] not in RULE_VERDICTS]
+        if bad:
+            raise ValueError("sheet_rules: rows need 8 values and 'Đánh giá' in %s: %s" % (list(RULE_VERDICTS), bad))
+        data = [(i + 1,) + tuple(r) + ("",) for i, r in enumerate(rows)]
+        s = self.table(RULE_SHEET, title, RULE_HEADERS, data, [5, 24, 46, 40, 40, 30, 10, 16, 34, 14], note)
         for r in range(5, 5 + len(data)):
-            t = s.cell(r, 6).value
-            s.cell(r, 6).fill = {"Xung đột SRS-Code": RED, "SRS tự mâu thuẫn": RED, "SRS có - Code thiếu": RED,
-                                 "Code có - SRS thiếu": YELLOW, "SRS mơ hồ": BLUE}.get(t, GREY)
-            st = str(s.cell(r, 11).value or "")
-            s.cell(r, 11).fill = RED if "DEV phải sửa" in st else (GREEN if st.startswith("Đã chốt") else YELLOW)
+            s.cell(r, 7).fill = RULE_VERDICTS[s.cell(r, 7).value]
         dv = DataValidation(type="list", formula1='"Đồng ý,Không đồng ý,Cần trao đổi"', allow_blank=True)
-        dv.add("L5:M%d" % (4 + len(data))); s.add_data_validation(dv)
+        dv.add("J5:J%d" % (4 + len(data))); s.add_data_validation(dv)
         return s
 
     def sheet_bugs(self, rows, title, note=BUG_NOTE):

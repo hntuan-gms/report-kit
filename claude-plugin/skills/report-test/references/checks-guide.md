@@ -33,7 +33,7 @@ Unknown `{names}` are left as they are.
     api: {method: GET, path: /masterdata/dashboard/cbtt/monthly-summary, params: {year: "{year}"}, rows: data.data}
     key: [thang]                                                  # identifies a row
     fields: {DK: slDinhKy, BT: slBatThuong, KH: slTinKhac}        # logical name -> field in the app's row
-  expected:                                                       # written from the SRS + standard, NOT from the app's SQL
+  expected:                                                       # written from the rule in plain words + standard, NOT from the app's SQL
     sql: |
       SELECT EXTRACT(MONTH FROM cd.SUBMISSION_DATE) M,
              COUNT(CASE WHEN cd.NEWS_TYPE_CD IN ('DINH_KY','BAO_CAO') THEN 1 END) DK,
@@ -71,7 +71,7 @@ Unknown `{names}` are left as they are.
 The kit reads the file **as Excel displays it**: number and date formats are applied, so 2.0 with `#,##0` compares as "2".
 
 Rules for the expected SQL:
-- It is written from the SRS + standard, e.g. status APPROVED/CLOSE, language VI, the latest correction, the company scope and data permission the SRS gives.
+- It is written from the rule as `analysis.md` states it in plain words + the standard, e.g. status APPROVED/CLOSE, language VI, the latest correction, the company scope and data permission the function applies. Never paste the view's SQL: rewrite the rule, so a slip in the view (a wrong join, a midnight bound, a missing filter) shows as DIFF.
 - **Cover the full scope with `matrix`**: every value the filter or dropdown offers, not a sample, and state the coverage in the workbook.
   - A range is written as one string: `matrix: {year: "{current_year}..2016"}` gives 2026, 2025, …, 2016 (in the order written). Lists can mix ranges and single values: `["2016..2019", "{current_year}"]`.
   - `require: {actual_rows: {min: 1}}` turns a value with no data into NM for the whole entry. Put the values with no data in their own entry without `require`: when the app and your SQL both return nothing, it shows as MATCH (0 cells), which is the evidence for "Không có dữ liệu".
@@ -136,6 +136,6 @@ Every UI entry starts in a fresh browser context with the saved login, and a fin
 |---|---|---|
 | MATCH | all compared cells equal the expectation | judge (usually P, if the expectation's basis is firm) |
 | DIFF | cells differ; each lists the variant that explains it | trace causes, judge (F with a firm basis, else PE) |
-| OBS | UI observed | read observations / screenshots, judge against SRS / standard |
+| OBS | UI observed | read observations / screenshots, judge against the standard and the function's rules |
 | NM | not measurable (precondition failed) | fix the entry, `rt check <code> --redo` |
 | ERR | the entry itself failed (selector, HTTP, SQL) | fix the entry, `rt check <code> --redo` |

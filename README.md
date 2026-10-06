@@ -2,14 +2,14 @@
 
 Gõ `/report-test <mã>` trong Claude Code, ví dụ `/report-test 1E_117`. Bộ kit chạy từ đầu đến cuối:
 
-1. tìm SRS, Quy chuẩn và workbook cũ, rồi dò code;
+1. tìm chức năng trong danh sách chức năng, Quy chuẩn và workbook cũ, rồi dò code từ đường dẫn menu;
 2. hỏi anh/chị **một lần** (tài khoản, có cho SELECT DB không, có ai đang demo không);
 3. đăng nhập, dò bẫy dữ liệu;
 4. quan sát màn hình và so số liệu bằng SQL độc lập;
 5. xuất workbook theo mẫu của dự án (KBKT).
 
 **Cách làm (cách A):**
-- **Claude** đọc SRS và code, rồi **đánh giá** mọi kết quả theo SRS và Quy chuẩn.
+- **Claude** đọc code của chức năng (đó là đặc tả), rồi **đánh giá** mọi kết quả theo Quy chuẩn chung, tính nhất quán của chính hệ thống và quy tắc mà code áp dụng. Kit không đọc SRS.
 - **Lệnh `rt`** làm phần cơ học: tìm đầu vào, dò code, đăng nhập, chạy các bước quan sát và so sánh, dựng workbook.
 - Kit **không tự chấm đạt / lỗi**, không sinh code test cho từng testcase, và không dùng assertion.
 
@@ -37,7 +37,7 @@ Có thể thay bằng biến môi trường `RK_LOGIN_USER`, `RK_LOGIN_PASSWORD`
 
 1. **Hồ sơ dự án.** Chạy `rt init` ở gốc repo, sau đó sửa `.report-kit/project.yaml`. Hồ sơ khai báo:
    - hệ thống, cách đăng nhập SSO, DB;
-   - vị trí code (`codemap`), danh sách chức năng, SRS, Quy chuẩn;
+   - vị trí code (`codemap`: file nhãn i18n, thư mục frontend của từng hệ thống), danh sách chức năng (sheet nào, cột nào), Quy chuẩn;
    - mẫu workbook;
    - bẫy dữ liệu riêng của dự án (`rules/traps.yaml`).
 2. **Skill.** Chọn một trong hai cách:
@@ -50,7 +50,7 @@ Có thể thay bằng biến môi trường `RK_LOGIN_USER`, `RK_LOGIN_PASSWORD`
 | Lệnh | Làm gì |
 |---|---|
 | `rt doctor [--db]` | Kiểm tra thư viện, trình duyệt, hồ sơ, secrets, mạng (DB chỉ khi có `--db`) |
-| `rt start <mã>` | Tìm chức năng, trích SRS (kèm ảnh), Quy chuẩn, workbook cũ (kèm comment), dò code → `brief.md` |
+| `rt start <mã> [--route /đường-dẫn]` | Tìm chức năng, trích Quy chuẩn, workbook cũ (kèm comment), dò code từ menu → màn hình → API → handler / view → `brief.md`. `--route` khi đường dẫn menu không khớp |
 | `rt login` | Đăng nhập SSO thật, lưu phiên. Phiên còn hạn thì dùng lại |
 | `rt probe <mã>` | Chạy bộ bẫy dữ liệu trên các bảng của báo cáo → `probe.md` |
 | `rt check <mã> [--only D01,U03] [--redo]` | Chạy `checks.yaml`. Mỗi mục chạy riêng; `--redo` chạy lại các mục NM / ERR |
@@ -64,7 +64,8 @@ Mọi file làm việc nằm ở `~/report-kit-work/<hồ sơ>/<mã>/`, ngoài r
 | File | Nội dung |
 |---|---|
 | `brief.md` | Tóm tắt đầu vào và kết quả dò code |
-| `inputs/` | SRS, Quy chuẩn, workbook cũ đã trích ra text |
+| `analysis.md` | Chức năng như đã xây dựng: các trường, cột, quy tắc (kèm `file:line`), do Claude viết |
+| `inputs/` | Dòng chức năng, Quy chuẩn, workbook cũ đã trích ra text |
 | `trace.json` | Kết quả dò code, cache theo commit |
 | `probe.md` | Bẫy dữ liệu tìm được |
 | `checks.yaml` | Các bước quan sát và so sánh |
@@ -76,7 +77,7 @@ Mọi file làm việc nằm ở `~/report-kit-work/<hồ sơ>/<mã>/`, ngoài r
 
 | | Cũ | report-kit |
 |---|---|---|
-| Dò code | Claude / agent grep tay (1E_117: khoảng 5 phút) | `rt start`: dấu vân tay từ SRS, xếp hạng file (1E_117: 2,4 giây, đúng file ở hạng 1), cache theo commit |
+| Dò code | Claude / agent grep tay (1E_117: khoảng 5 phút) | `rt start`: đi theo menu → route → component → service → mã báo cáo (R017…) → handler / view, xếp hạng file (khoảng 3 giây mỗi báo cáo; 52/63 báo cáo tìm thấy màn hình từ đường dẫn menu), cache theo commit |
 | Dò dữ liệu | Viết query tay từng bẫy | `rt probe`: 12 bẫy khai báo sẵn, có ví dụ thật (1E_117: 7,7 giây) |
 | Quan sát giao diện | Viết script Python / JS mới mỗi lần, cố định ngày | Khai báo bước trong `checks.yaml`, biến động `{current_year}` / `{prev_month}` …, mỗi mục một trang riêng |
 | Đo sai im lặng | Không phát hiện | Tiền đề `ready` / `require` → NM "không đo được" |

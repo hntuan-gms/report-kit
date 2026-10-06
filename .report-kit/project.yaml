@@ -6,7 +6,7 @@ name: my-project
 repo_root: ..                                   # the repo this folder belongs to
 
 paths:
-  tools_dir: "{home}/Documents/TestInputs"      # function list, SRS files, workbook template, standard document
+  tools_dir: "{home}/Documents/TestInputs"      # function list, workbook template, standard document
   work_root: "{home}/report-kit-work/my-project" # outside every repo: inputs, traces, runs, screenshots
   code_root: "{repo_root}"                      # where the application code is
 
@@ -43,15 +43,21 @@ ui:
 inputs:
   function_list:
     glob: "*function list*.xlsx"
+    sheet: 1                                    # 1-based index or sheet name
     header_contains: "Code"                     # a text found in the header row
-    columns: {jira: "Jira", ticket: "Ticket", name: "Name", pic: "PIC", srs: "SRS", system: "System"}
-  srs_globs: ["SRS/**/*{code}*", "SRS/**/{srs}"]
+    code_columns: ["Name"]                      # where the report code ("[# 1E_117] ...") is looked up
+    columns: {jira: "Jira", ticket: "Ticket", name: "Name", pic: "PIC", system: "System",
+              menu: "Menu"}                     # menu path "A >> B >> C": where the code trace starts
+    # ticket: {column: testcase, regex: "^(AI-\\d+)_"}   # when the ticket is only part of another column
   standard: {glob: "**/*standard*.docx", summary: rules/standard.md}
   previous_workbooks: "*{code_nodash}*.xlsx"
 
 codemap:
-  include: ["**/src/main/**/*.java", "**/src/app/**/*.ts", "**/src/app/**/*.html", "**/*.sql"]
+  include: ["**/src/main/**/*.java", "**/src/app/**/*.ts", "**/src/app/**/*.html", "**/*.sql", "**/i18n/**/*.json"]
   exclude: ["**/*.spec.ts", "**/test/**"]
+  i18n: "**/i18n/vi/**/*.json"                  # label files in the language of the menu path
+  frontend: {}                                  # system key -> frontend folder, e.g. {main: web-frontend}
+  report_code: "R\\d{3}"                         # shape of a report code in the code (strongest fingerprint)
   stop_tokens: []
 
 rules:

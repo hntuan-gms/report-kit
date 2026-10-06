@@ -3,7 +3,7 @@
 Project-specific lessons live in the profile's `rules/lessons.md`. These apply everywhere.
 
 ## Judging
-- **The report's own query is not the oracle.** Build expected values from the SRS + standard. Otherwise the comparison only proves the query equals itself.
+- **The report's own query is not the oracle.** Build expected values from the rule written in plain words + the standard, not by copying the view's SQL. Otherwise the comparison only proves the query equals itself.
 - **Attribute every differing cell to a cause** by adding variants (the app's rule, the standard with one condition dropped).
   - A cell equal to a variant is explained by that rule.
   - A cell no variant explains must be traced with `rt sql` before it goes in the workbook.

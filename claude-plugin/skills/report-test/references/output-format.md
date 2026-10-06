@@ -8,7 +8,7 @@ There is no reference workbook to copy wording from: follow the rules on this pa
 - **Data comparison:** state the scope and the result in numbers, e.g. "118 công ty, 1.837 ô có dữ liệu, 29 ô sai, 9 ô chưa rõ quy tắc". Every wrong cell is traced to the source record that causes it.
 - **Each data rule has one real example** from the environment: a correction chain with the value it changes, a draft on top of an approved record, a NULL period, a deleted or out-of-scope record, duplicates. Name it (company, period, ID, value).
 - **Each bug states:** the mechanism in one sentence (what the code does wrong), how many cells or rows it hits, and one concrete example. "The dedup takes the latest row with no status filter, so drafts override approved values (27 ô; ANV 2022: 18 → 23)."
-- **The SRS-vs-code sheet lists every point**, including the ones that are not bugs: indicators missing from the SRS, source forms not specified, rules one report applies and a sibling report doesn't, rules nobody wrote down.
+- **The "Quy tắc nghiệp vụ" sheet lists every rule the function applies**, including the correct ones: data scope (status, language, corrections, company scope), filters, calculations, display, and the rules one report applies and a sibling report doesn't.
 
 ## File name and version
 
@@ -48,18 +48,33 @@ Columns:
 |---|---|---|
 | B | Mục đích kiểm thử | "Kiểm tra …" in plain words, specific ("Kiểm tra số kiểm toán viên 'Hiện tại' không bị âm") |
 | C | Các bước thực hiện | Numbered **screen actions** with the concrete data used ("1. Chọn Từ năm = 2026, Tên công ty = Công ty TNHH KPMG 2. Nhấn [Tìm kiếm] 3. Xem nhóm …"). No API paths |
-| D | Kết quả mong muốn | What must happen, in business terms, stated independently of what the system does |
+| D | Kết quả mong muốn | What must happen, in business terms: the function's rule (from `analysis.md`) or the Quy chuẩn, in plain words. Never "như hệ thống đang làm" |
 | E/F/G | Lần 1/2/3 | `P` / `F` / `PE` only, with green / red / yellow fill. Empty = not run |
-| H | Kết quả hiện tại | Starts with `Đạt.` (P) / `Sai.` (F) / `Cần BA xác nhận.` (PE) / `Chưa thực hiện - <lý do>` (not run). Then **what was seen on the screen or in the file**, one concrete example (company name, year, value), and for F / PE the cause in business words. No `file:line`, table / column names, record IDs or run ids here |
+| H | Kết quả hiện tại | Starts with `Đạt.` (P) / `Sai.` (F) / `Cần BA xác nhận.` (PE, rare) / `Chưa thực hiện - <lý do>` (not run). Then **what was seen on the screen or in the file**, one concrete example (company name, year, value), and for F / PE the cause in business words. No `file:line`, table / column names, record IDs or run ids here |
 | I | Mã lỗi | Bug id from sheet "Danh sách lỗi" |
-| J | Ghi chú | Line 1: the **basis**: `Căn cứ: SRS …`, `Căn cứ: Quy chuẩn chung mục II.3`, `Căn cứ: code (SRS và Quy chuẩn chung không quy định) - cần BA xác nhận (BA làm rõ N)`. Line 2 `Kỹ thuật: …`: the evidence for DEV / BA: `file:line`, table.column, record IDs, SQL counts, run ids (U05, D04) |
+| J | Ghi chú | Line 1: the **basis** (see "Căn cứ" below). Line 2 `Kỹ thuật: …`: the evidence for DEV / BA: `file:line`, table.column, record IDs, SQL counts, run ids (U05, D04) |
+
+### Căn cứ (line 1 of column J)
+
+One line, the first that applies:
+
+| Basis | Wording |
+|---|---|
+| The Quy chuẩn covers it | `Căn cứ: Quy chuẩn chung TC-TK mục II.5.1` |
+| The system contradicts itself | `Căn cứ: lưới và file Excel phải thống nhất` / `Căn cứ: nhãn cột "Ngày QĐ lần đầu" và dữ liệu trong cột phải thống nhất` / `Căn cứ: trường bắt buộc phải có dấu (*)` |
+| Plain correctness | `Căn cứ: ràng buộc dữ liệu - số kiểm toán viên không thể âm` / `Căn cứ: "Đến ngày" gồm cả ngày cuối` / `Căn cứ: danh sách chọn phải có đủ giá trị` |
+| Runtime error | `Căn cứ: chức năng phải chạy không lỗi` |
+| Security | `Căn cứ: KBKT_Template khối An toàn thông tin` |
+| The function's own rule (scope, priority, labels, messages) | `Căn cứ: thiết kế chức năng` |
+
+Never `Căn cứ: SRS …`, and never a sentence saying the SRS was not used, is outdated, or that the code is the reference.
 
 ### Writing style (test case sheet)
 
 The test case sheet is read by Testers and BAs, not only by DEV. Write it so a reader who has never opened the code understands every row.
 - Short Vietnamese sentences, one idea each. Name things the way the screen names them (the column title, the button label, the company name), not by table / column / variable names.
 - No internal shorthand in B, C, D, H: no `NaN`, `MATCH`, `NM`, `view`, `dedup`, `RN = 1`, `CTE`, `API`, `request`. When a technical term is unavoidable, explain it once in plain words.
-- Technical detail is never lost: it moves from H to the `Kỹ thuật:` line of J, or to the sheets "So sánh SRS - Code" / "Danh sách lỗi" / "Chi tiết sai lệch dữ liệu", which keep the full technical wording for DEV.
+- Technical detail is never lost: it moves from H to the `Kỹ thuật:` line of J, or to the sheets "Quy tắc nghiệp vụ" / "Danh sách lỗi" / "Chi tiết sai lệch dữ liệu", which keep the full technical wording for DEV.
 - Numbers use the Vietnamese format in prose (1.837 ô, 6.136 lượt); values copied from the screen stay as shown.
 
 Example (F):
@@ -70,14 +85,21 @@ Example (F):
 | C | 1. Chọn Từ năm = Đến năm = 2026, Tên công ty = Công ty TNHH KPMG<br>2. Nhấn [Tìm kiếm]<br>3. Xem nhóm "Thông tin tăng/giảm KTV", cột BTC và UBCK |
 | D | Hiện tại = Đầu kỳ + Tăng − Giảm. Đây là số người nên không bao giờ âm |
 | H | Sai. KPMG năm 2026 hiện Đầu kỳ 0, Tăng 0, Giảm 40, Hiện tại −40 (cả BTC và UBCK). Cũng bị âm: AISC (−29 / −23). Nguyên nhân: 40 kiểm toán viên nghỉ được trừ ở cột Giảm nhưng chưa từng được cộng vào Đầu kỳ, vì quyết định chấp thuận của họ không ghi ngày ban hành. |
-| J | Căn cứ: SRS AG6.<br>Kỹ thuật: view so sánh APPROVAL_ISSUE_DATE = MIN(…), bản ghi ngày ban hành NULL bị loại (R104_v_rpt_tong_hop_ctkt.sql:272-294); API trả btcAudHienTai = −40 (D04, U14). |
+| J | Căn cứ: ràng buộc dữ liệu - số kiểm toán viên không thể âm.<br>Kỹ thuật: view so sánh APPROVAL_ISSUE_DATE = MIN(…), bản ghi ngày ban hành NULL bị loại (R104_v_rpt_tong_hop_ctkt.sql:272-294); API trả btcAudHienTai = −40 (D04, U14). |
 
-Example (PE), column H: "Cần BA xác nhận. Hệ thống có hiện ngày, ví dụ PKF Việt Nam bị thu hồi ngày 11/07/2026. Nhưng SRS yêu cầu lấy ngày từ một trường khác, và trường đó đang trống ở mọi bản ghi. Nếu làm đúng SRS thì hai cột này luôn trống."
+Example (P on the function's own rule):
+
+| Cột | Text |
+|---|---|
+| B | Kiểm tra thứ tự ưu tiên loại báo cáo khi lấy Vốn đầu tư chủ sở hữu |
+| D | Lấy từ BCTC năm gần nhất đã duyệt, theo thứ tự ưu tiên Hợp nhất, Tổng hợp, Mẹ, Riêng |
+| H | Đạt. Công ty ILC năm 2025 có cả BCTC Mẹ và BCTC Riêng, không có Hợp nhất: màn hình hiện số của BCTC Mẹ (55,340,627,293). |
+| J | Căn cứ: thiết kế chức năng.<br>Kỹ thuật: R112 ... (file:line); D07 |
 
 Status meaning:
-- `P`: matches the expected result.
-- `F`: doesn't match, and the expected result has a firm basis (SRS or Quy chuẩn).
-- `PE`: the behaviour was observed but the expected result is not settled. Use it when the only basis is the code, or the SRS is vague. Link the case to a question in "BA làm rõ".
+- `P`: matches the expected result: the Quy chuẩn where it applies, otherwise the function's own rule.
+- `F`: breaks the Quy chuẩn, contradicts the system itself, is plainly wrong for any business rule, fails at runtime, or fails a security case.
+- `PE`: rare. Only when the Quy chuẩn is ambiguous on a point it covers. Link the case to a question in "BA làm rõ".
 
 Run information: fill in the template's comment on the Lần N header (E11) and on H10:
 ```
@@ -89,20 +111,19 @@ Get the build date with `curl -sI <site>/ | grep -i last-modified`.
 
 ## Companion sheets (same order)
 
-1. **So sánh SRS - Code**: the required review sheet. Columns are `reportkit.workbook.SVC_HEADERS`. One row per point:
-   - SRS text → code behaviour (`file:line`) → what the dev environment showed → type (see list below) → severity → proposed SRS change → proposed DEV change → the Quy chuẩn chung ruling → status after the Quy chuẩn → 3 empty review columns (BA xác nhận, DEV xác nhận, Kết luận).
-   - Types: Xung đột SRS-Code / Code có - SRS thiếu / SRS có - Code thiếu / SRS mơ hồ / SRS tự mâu thuẫn / Khác.
-   - Status wording: "Đã chốt: hệ thống đang đúng", "Đã chốt - DEV phải sửa (BUG-xx)", "Còn mở", "Còn mở - SRS … phải ghi rõ".
-   - The note in row 2 names every source used, including the repo commit and the dev run dates.
+1. **Quy tắc nghiệp vụ**: the rules of the function as built, from `analysis.md`. Built with `wb.sheet_rules(rows, title, note)`; columns are `reportkit.workbook.RULE_HEADERS`. One row per rule:
+   - hạng mục → the rule in plain words → `file:line` → what the environment showed (with one example) → the Quy chuẩn section it falls under (or `-`) → đánh giá → bug id or case ids → ghi chú. The kit adds an empty "DEV xác nhận" column.
+   - Đánh giá: `Đúng` (green), `Lỗi` (red, with the bug id), `Lưu ý` (yellow: correct but worth knowing, e.g. a sibling report applies another scope).
+   - The note in row 2 names the repo commit the `file:line` references point to, and the dev run dates.
 2. **Danh sách lỗi**: `BUG-nn`, severity, status, description, basis, cause in code, evidence (date + concrete values), and **Hình ảnh minh chứng** (column H, filled by `wb.sheet_evidence`: a link "Xem hình BUG-01 (1/2) (+1 hình tiếp theo)" to the picture, or `Không có hình: <lý do>`).
    - Statuses: Mới / Mở / Mở (chưa kiểm lại được) / Đã đóng / Rút lại theo Quy chuẩn …
    - Keep withdrawn and closed bugs listed, with the reason, so reviewers can trace them.
 3. **Hình ảnh lỗi**: one picture per bug, or per way the bug shows (two causes, two screens: `BUG-01 (1/2)`, `(2/2)`). Built with `wb.sheet_evidence(cards, title, note, no_image)`; see "Hình ảnh lỗi" below.
 4. **Chi tiết sai lệch dữ liệu**: every wrong cell from the data comparison. Give the key, column, field, value shown, expected value, cause (which submission / rule) and bug id. The note states the expected-value rule and what was excluded.
-5. **BA làm rõ**: topic, question, severity, status (`Đã chốt` / `Còn mở` / `Chốt một phần`), answer. When the Quy chuẩn settles a question, keep it and fill in the answer with the section number.
-6. **Nguồn dữ liệu**: one row per output row or column. Give where it comes from (table.column / form field code / FIELD_ID / data type / lookup group) and its mapping to the SRS item. Mark "Không có trong SRS" where it applies.
+5. **BA làm rõ**: only when a PE needs one (the Quy chuẩn is ambiguous). Topic, question, severity, status (`Đã chốt` / `Còn mở` / `Chốt một phần`), answer. No sheet when there is no question.
+6. **Nguồn dữ liệu**: one row per output row or column. Give where it comes from (table.column / form field code / FIELD_ID / data type / lookup group) and the screen / file column it feeds.
 7. **Ma trận bao phủ**: the answer to "is the set complete?". Built with `wb.sheet_coverage(rows, title)`, one row per requirement:
-   - Sources, in this order: every SRS cell that states a rule; every standard section that applies (and one row for the sections that don't, with why); every data / display rule of the code (`file:line`); every FOUND trap of `probe.md`; every applicable item of `references/test-areas.md`; the sibling difference (e.g. "Tài khoản CTĐC") when the brief lists siblings.
+   - Sources, in this order: every element of the screen and the file (field, button, column; source `Màn hình` / `File Excel`); every rule of "Quy tắc nghiệp vụ" (source `Quy tắc nghiệp vụ`); every standard section that applies (and one row for the sections that don't, with why); every FOUND trap of `probe.md`; every applicable item of `references/test-areas.md`; the sibling difference (e.g. "Tài khoản CTĐC") when the brief lists siblings.
    - Each row is `(source, item, requirement, case_keys, note)`. `case_keys` are the beginnings of the cases' "Mục đích"; the kit fills in the case ids (as column A shows them) and the P / F / PE tally, and raises an error when a key matches no case.
    - A row with no case must have a note starting `Không áp dụng: <why>` or `Chưa phủ: <why>`.
    - For a trap, put its id in "Mục" as `probe.md` prints it; when the same trap is FOUND on several tables, add the table: `soft_deleted (FORMS)`.
@@ -123,7 +144,7 @@ What a card shows, top to bottom:
 | Kết quả mong đợi (green) | the correct values and which record they come from |
 | ①②③ panels | the evidence, each with a caption that says what to look at |
 | Note (yellow) | same cause elsewhere, how many cells / rows, pointer to "Chi tiết sai lệch dữ liệu" |
-| Footer | `Căn cứ:` (SRS / Quy chuẩn §) · `Nguyên nhân (code):` (`file:line`) |
+| Footer | `Căn cứ:` (the bug's basis, worded as in "Căn cứ") · `Nguyên nhân (code):` (`file:line`) |
 
 Panels, by kind of bug:
 
@@ -159,6 +180,7 @@ Rules:
 - List the main bugs, each with one concrete example, and the number of pictures in "Hình ảnh lỗi" (bugs with `Không có hình`, and why).
 - Say what could not be run and why.
 - Say what changed compared with the previous version.
+- List the half-built functions found in the code (no case was written for them).
 
 ## The builder script (`<workspace>/build_workbook.py`)
 
@@ -176,7 +198,7 @@ wb.tc(purpose, steps, expected, basis="Căn cứ: ...", status="P", actual="conc
 wb.finish(run_date="dd/mm/yyyy", run_note="Thời gian: ...
 Người thực hiện: ...
 Bản build: ...")
-wb.sheet_svc(svc_rows, title, note); wb.sheet_bugs(bug_rows, title)        # bug_rows: 7 values, column H comes next
+wb.sheet_rules(rule_rows, title, note); wb.sheet_bugs(bug_rows, title)    # rule_rows: 8 values; bug_rows: 7 values, column H comes next
 run = ws.latest_run(); shots = os.path.join(run, "shots")
 meta = dict(account="gms", env="ids-dev-gms.net", build="frontend cập nhật 05/10/2026 11:30",
             screen="Trang chủ > Trang tổng hợp CBTT nội bộ")
@@ -196,9 +218,9 @@ wb.sheet_evidence(cards, "HÌNH ẢNH MINH CHỨNG LỖI - [# 1E_117] ...",
                   "Chụp 05/10/2026 14:40-14:55, bản build ... Tài khoản gms. Ảnh màn hình: Chromium 1440x900. ...",
                   no_image={"BUG-09": "lỗi chỉ xảy ra khi máy chủ phản hồi chậm hơn 50 s, không thể hiện trên hình"})
 wb.sheet_details(W.details_from_run(ws.latest_run()) + extra_rows, title, note)
-wb.sheet_ba(ba_rows, title); wb.sheet_sources(rows, title, headers, widths)
+wb.sheet_sources(rows, title, headers, widths)            # wb.sheet_ba(ba_rows, title) only when a PE needs a question
 wb.sheet_coverage([
-    ("SRS sheet 2", "C49-C51", "Định kỳ / Bất thường / Tin khác theo tháng", ["Kiểm tra toàn bộ số lượng tin"], ""),
+    ("Quy tắc nghiệp vụ", "Số tin theo tháng", "Định kỳ / Bất thường / Tin khác theo tháng, chỉ tin đã duyệt", ["Kiểm tra toàn bộ số lượng tin"], ""),
     ("Bẫy dữ liệu (rt probe)", "soft_deleted (FORMS)", "Biểu mẫu đã xoá", ["Kiểm tra tin thuộc biểu mẫu đã xoá"], ""),
     ("Quy chuẩn chung", "II.3, II.4", "Ngày xuất dữ liệu, Từ-Đến", [], "Không áp dụng: màn hình không có trường ngày"),
 ], "Ma trận bao phủ: [# 1E_117] ...")

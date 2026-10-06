@@ -1,3 +1,3 @@
 # Project standard (summary)
 
-Rules that override an individual SRS. One row per rule: what it says and what to check.
+The project standard: it overrides the code on everything it covers. One row per rule: what it says and what to check.

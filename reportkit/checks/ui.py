@@ -1,5 +1,5 @@
 """UI check = declared steps + observations. No verdicts: Claude reads the observations and screenshots
-and judges them against the SRS / standard (the kit only records what the screen showed).
+and judges them against the report's rules / standard (the kit only records what the screen showed).
 
   - id: U05
     title: Tooltip biểu đồ xếp hạng

@@ -1,7 +1,7 @@
 """Preconditions on observed values (the `require:` block of a check).
 
 These never decide whether the app is right or wrong - Claude does that by reading the
-observations against the SRS / standard. They only decide whether the measurement itself is
+observations against the report's rules / standard. They only decide whether the measurement itself is
 usable: when a precondition fails the check is reported as NM ("không đo được") so nobody
 judges the app from an empty or wrong observation (e.g. charts not rendered yet, tooltip read
 from the wrong slice). Each spec is {op: arg, ...}; all ops must hold.

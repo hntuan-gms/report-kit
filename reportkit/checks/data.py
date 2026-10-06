@@ -1,5 +1,5 @@
-"""Data check: expected rows from an independent SQL (written from the SRS + standard, never from the
-report's own view) vs the rows the app returns (JSON API or exported Excel). Cell by cell.
+"""Data check: expected rows from an independent SQL (written from the rules the report states + the standard,
+never by reusing the report's own view) vs the rows the app returns (JSON API or exported Excel). Cell by cell.
 
   - id: D01
     title: Số lượng tin theo tháng

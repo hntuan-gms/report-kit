@@ -158,7 +158,7 @@ def norm_code(code):
 class Workspace(object):
     """<work_root>/<CODE>/ - everything produced for one report, kept between sessions.
 
-    inputs/            function.json, srs_N.txt + images, standard.txt, previous workbook dumps
+    inputs/            function.json, standard.txt, previous workbook dumps
     brief.md           short summary of the inputs + code trace (read this first)
     trace.json         code trace (cached by git commit)
     probe.json/.md     data traps found

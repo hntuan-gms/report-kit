@@ -1,6 +1,6 @@
 {
   "name": "report-kit",
   "version": "0.1.0",
-  "description": "Test report / search / statistics screens end to end with one command (/report-test <code>): Claude reads SRS + code and judges; the rt CLI observes the screen and compares data with independent SQL; output in the project's workbook template.",
+  "description": "Test report / search / statistics screens end to end with one command (/report-test <code>): the rt CLI traces the screen's code from the menu, observes the screen and compares data with independent SQL; Claude reads the code and judges against the project standard; output in the project's workbook template.",
   "author": {"name": "hntuan"}
 }

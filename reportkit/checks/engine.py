@@ -6,7 +6,7 @@ checks.yaml (in the report workspace):
     data: [ ... ]               # see checks/data.py - independent SQL vs what the app returns
     ui:   [ ... ]               # see checks/ui.py   - steps + observations, no verdicts
 
-Statuses describe the measurement only. Claude decides P / F / PE from the SRS and the standard:
+Statuses describe the measurement only. Claude decides P / F / PE from the rules of the report and the standard:
     data: MATCH  every compared cell equals the independent expectation
           DIFF   some cells differ (listed, with the alternative rule that explains each one, if any)
     ui:   OBS    observed - read the observations / screenshots

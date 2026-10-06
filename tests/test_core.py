@@ -76,13 +76,101 @@ def test_compare_numeric_and_text():
     assert k == {("1",): {"DK": 5}, ("2",): {"DK": 7}}
 
 
-# ---------------------------------------------------------------- locate fingerprints
-def test_fingerprints_from_srs_text():
-    srs = ("Lấy tin từ COMPANY_DATA với NEWS_TYPE_CD in ('DINH_KY','BAO_CAO'); trạng thái 'SUBMITTED_LATE'. "
+# ---------------------------------------------------------------- locate
+def test_fingerprints_from_free_text():
+    txt = ("Lấy tin từ COMPANY_DATA với NEWS_TYPE_CD in ('DINH_KY','BAO_CAO'); trạng thái 'SUBMITTED_LATE'. "
            "Tên biểu đồ: XU HƯỚNG VI PHẠM CÔNG BỐ THÔNG TIN QUA CÁC NĂM")
-    ids, phrases = locate.fingerprints(srs)
+    ids, phrases = locate.fingerprints(txt)
     assert {"COMPANY_DATA", "NEWS_TYPE_CD", "DINH_KY", "BAO_CAO", "SUBMITTED_LATE"} <= set(ids)
     assert any("XU HƯỚNG VI PHẠM" in p for p in phrases)
+
+
+def test_labels_and_globs():
+    assert locate.label_variants("CTĐC đăng ký với UBCKNN/ Danh sách (mới)")[:3] == [
+        "ctđc đăng ký với ubcknn/ danh sách (mới)", "ctđc đăng ký với ubcknn", "danh sách (mới)"]
+    assert locate._match("ids-frontend/src/app/app.routes.ts", "*-frontend/src/app/**/*.ts")          # '**/' = no folder too
+    assert locate._match("ids-frontend/src/app/pages/x/a.component.ts", "*-frontend/src/app/**/*.ts")
+    assert not locate._match("ids-frontend/src/assets/a.ts", "*-frontend/src/app/**/*.ts")
+
+
+def test_menu_entries_keep_parents():
+    text = """export const MENU = [
+      { id: 'stats', title: 'menu.statistics', children: [
+          { id: 'ctdc', title: 'menu.publicCompanyStats', children: [
+              { id: 'gov', title: 'menu.governance', routerLink: '/statistics/ctdc/governance' },   // a comment with { brace
+          ] },
+      ] },
+      { id: 'home', title: 'menu.dashboard', routerLink: '/dashboard' },
+    ];"""
+    e = {x["title"]: x for x in locate.menu_entries(text)}
+    assert e["menu.governance"]["link"] == "/statistics/ctdc/governance"
+    assert e["menu.governance"]["parents"] == ["menu.statistics", "menu.publicCompanyStats"]
+    assert e["menu.dashboard"]["parents"] == [] and e["menu.statistics"]["link"] is None
+
+
+def _fake_repo(root):
+    files = {
+        "web/src/assets/i18n/vi/menu.json": '{"menu": {"statistics": "Thống kê", "ctdc": "Thống kê CTĐC", "gov": "BC quản trị", "other": "BC quản trị"}}',
+        "web/src/app/shared/menu.data.ts": """export const M = [
+            { title: 'menu.statistics', children: [ { title: 'menu.ctdc', children: [
+                { title: 'menu.gov', routerLink: '/statistics/ctdc/governance' } ] } ] },
+            { title: 'menu.other', routerLink: '/elsewhere' } ];""",
+        "web/src/app/pages/statistics/statistics.routes.ts": """export const routes = [
+            { path: 'ctdc/governance', loadComponent: () => import('./gov/gov.component').then((c) => c.GovComponent) },
+            { path: 'ctdc/other', loadComponent: () => import('./other/other.component').then((c) => c.OtherComponent) } ];""",
+        "web/src/app/pages/statistics/gov/gov.component.ts": """import { ReportService } from '../../../service/report.service';
+            export class GovComponent { private readonly reportService = inject(ReportService);
+              readonly reportCode = ReportCode.R017_QUAN_TRI;
+              load() { this.reportService.export(this.reportCode); } }""",
+        "web/src/app/pages/statistics/gov/gov.component.html": "<h1>{{ 'statistics.gov.title' | translate }}</h1>",
+        "web/src/app/service/report.service.ts": """export class ReportService { apiUrl = 'report';
+              export(code) { return this.http.post(`${this.baseUrl}/${this.apiUrl}/${code}/export`, {}); }
+              other() { return this.http.get('/unused/thing'); } }""",
+        "api/src/main/java/R017QuanTriReport.java": """class R017QuanTriReport { ReportCode code() { return ReportCode.R017_QUAN_TRI; }
+              String sql = "SELECT * FROM V_RPT_R017_QUAN_TRI"; String tpl = "templates/excel/R017_quan_tri.xlsx"; }""",
+        "api/src/main/java/ReportCode.java": "enum ReportCode { " + ", ".join("R%03d_X" % i for i in range(1, 30)) + ", R017_QUAN_TRI }",
+        "api/src/main/java/ReportController.java": '@RequestMapping("/{reportCode}") class ReportController { @PostMapping("/export") void e() {} }',
+        "api/src/main/resources/db/R017_v.sql": "CREATE OR REPLACE VIEW V_RPT_R017_QUAN_TRI AS SELECT * FROM COMPANY_DATA JOIN FORMS ON 1=1",
+        "api/src/main/resources/templates/excel/R017_quan_tri.xlsx": "",
+    }
+    for rel, body in files.items():
+        p = root / rel; p.parent.mkdir(parents=True, exist_ok=True); p.write_text(body, encoding="utf-8")
+
+
+def test_locate_follows_menu_to_backend(tmp_path):
+    root = tmp_path / "repo"; _fake_repo(root)
+    prof = _mini_profile(tmp_path, {"paths": {"tools_dir": str(tmp_path / "tools"), "work_root": str(tmp_path / "w"), "code_root": str(root)},
+                                    "codemap": {"include": ["web/src/**/*.ts", "web/src/**/*.html", "web/src/**/*.json",
+                                                            "api/src/**/*.java", "api/src/**/*.sql"],
+                                                "i18n": "web/src/assets/i18n/vi/**/*.json", "frontend": {"a": "web"}}})
+    ws = prof.workspace("X_1")
+    fn = {"menu": "Thống kê >> Thống kê CTĐC >> BC quản trị >> Tab chi tiết", "name": "[# X_1] Báo cáo quản trị", "system_key": "a"}
+    t = locate.locate(prof, ws, fn)
+    assert t["method"] == "menu path" and t["routes"] == ["/statistics/ctdc/governance"]       # 'other' has no matching parents
+    assert t["menu"][0]["unmatched_tail"] == ["Tab chi tiết"]
+    assert t["components"] == ["web/src/app/pages/statistics/gov/gov.component.ts"]
+    assert t["endpoints"] == ["POST /report/{}/export (report.service.ts.export)"]
+    assert t["report_codes"] == ["R017"]
+    be = [x["file"] for x in t["top"] if x["score"] is not None]
+    assert be[0] == "api/src/main/java/R017QuanTriReport.java"                                   # the registry enum ranks below
+    assert be.index("api/src/main/java/ReportCode.java") > 0
+    assert {"V_RPT_R017_QUAN_TRI", "COMPANY_DATA", "FORMS"} <= set(t["sql_objects"])
+    assert t["views"][0]["file"] == "api/src/main/resources/db/R017_v.sql"
+    assert t["templates"] == ["api/src/main/resources/templates/excel/R017_quan_tri.xlsx"]
+    assert locate.locate(prof, ws, fn).get("cached")
+    md = locate.trace_md(t)
+    assert "Tab chi tiết" in md and "R017QuanTriReport.java" in md
+
+
+def test_locate_with_route_and_without_menu(tmp_path):
+    root = tmp_path / "repo"; _fake_repo(root)
+    prof = _mini_profile(tmp_path, {"paths": {"tools_dir": str(tmp_path / "tools"), "work_root": str(tmp_path / "w"), "code_root": str(root)},
+                                    "codemap": {"include": ["web/src/**/*.ts", "web/src/**/*.json", "api/src/**/*.java"],
+                                                "i18n": "web/src/assets/i18n/vi/**/*.json"}})
+    t = locate.locate(prof, prof.workspace("X_2"), {"name": "x"}, route="/statistics/ctdc/governance")
+    assert t["method"] == "route given" and t["components"][0].endswith("gov.component.ts")
+    t = locate.locate(prof, prof.workspace("X_3"), {"name": "[# X_3] Không có trong code"})
+    assert t["method"].startswith("name only") and "screen component" in t["not_found"]
 
 
 # ---------------------------------------------------------------- profile + workspace
@@ -144,10 +232,10 @@ def test_coverage_sheet_ids_and_gate(tmp_path):
     wb.tc("Kiểm tra C", "1.", "kq C")
     assert [cid for _, cid, _ in wb.case_ids().values()] == ["X_1_1", "X_1_2", "X_1_3"]
     with pytest.raises(ValueError):
-        wb.sheet_coverage([("SRS", "B1", "r", ["Kiểm tra Z"], "")], "t")         # no such case
+        wb.sheet_coverage([("Quy tắc nghiệp vụ", "B1", "r", ["Kiểm tra Z"], "")], "t")         # no such case
     with pytest.raises(ValueError):
-        wb.sheet_coverage([("SRS", "B1", "r", [], "vì sao đó")], "t")            # no case and no reason
-    wb.sheet_coverage([("SRS", "B1", "r1", ["Kiểm tra A", "Kiểm tra B"], ""),
+        wb.sheet_coverage([("Quy tắc nghiệp vụ", "B1", "r", [], "vì sao đó")], "t")            # no case and no reason
+    wb.sheet_coverage([("Quy tắc nghiệp vụ", "B1", "r1", ["Kiểm tra A", "Kiểm tra B"], ""),
                        ("Bẫy dữ liệu (rt probe)", "lang_twins (T1)", "r2", ["Kiểm tra B"], ""),
                        ("Quy chuẩn chung", "II.3", "r3", [], "Không áp dụng: không có ô ngày")], "t")
     out = wb.save()
@@ -162,26 +250,75 @@ def test_coverage_sheet_ids_and_gate(tmp_path):
     assert g["cases_not_referenced"] == ["X_1_3"]
 
 
-def test_siblings_share_srs_or_code(tmp_path):
+def _function_list(prof, rows, sheet_title="List chức năng"):
+    fl = openpyxl.Workbook(); first = fl.active; first.title = "List báo cáo"
+    first.append(["Link UC", "UC Name"]); first.append(["OLD", "[# 1E_117] Bản cũ - không dùng"])
+    sh = fl.create_sheet(sheet_title)
+    sh.append(["KBKT bàn giao"])
+    sh.append(["Stt", "Phân hệ", "Mã Jira", "New UC Name", "Use Case Name", "Menu/tab tương ứng", "Menu/tab (cấp thấp nhất)",
+               "PIC", "PIC DEV", "Link testcase của DEV"])
+    for r in rows:
+        sh.append(r)
+    fl.save(os.path.join(prof.tools_dir, "list.xlsx"))
+
+
+FL_CFG = {"inputs": {"function_list": {
+    "glob": "list.xlsx", "sheet": "List chức năng", "header_contains": "Mã Jira", "code_columns": ["New UC Name"],
+    "columns": {"jira": "Mã Jira", "name": "New UC Name", "system": "Phân hệ", "menu": "Menu/tab (cấp thấp nhất)",
+                "pic": "PIC DEV", "testcase": "Link testcase của DEV"},
+    "ticket": {"column": "testcase", "regex": "^(AI-\\d+)_"}}}}
+
+
+def test_function_list_second_sheet(tmp_path):
+    from reportkit import inputs
+    prof = _mini_profile(tmp_path, FL_CFG)
+    _function_list(prof, [
+        [117, "IDS", "HSISI-806", "[# 1E_117] Trang nội bộ", "[ # 1E_130] Dashboard", "x", "Trang chủ (dashboard)",
+         "Huyền", "Hoang Nghia Tuan", "AI-23_1E117_TrangNoiBo_v4.xlsx"],
+        [130, "IDS", "HSISI-819", "[# 1E_130] Vi phạm định kỳ", "[ # 1E_143] Khác", "x", "Thống kê >> Vi phạm CBTT >> Định kỳ",
+         "Huyền", "Tran", None]])
+    fn = inputs.find_function(prof, "1E_117")
+    assert fn["jira"] == "HSISI-806" and fn["pic"] == "Hoang Nghia Tuan" and fn["ticket"] == "AI-23"     # 'PIC DEV' beats 'PIC'
+    assert "[List chức năng]" in fn["source"] and fn["name"].startswith("[# 1E_117]")
+    fn = inputs.find_function(prof, "1E_130")             # 1E_130 also appears in 'Use Case Name' of row 117: ignored
+    assert fn["jira"] == "HSISI-819" and fn["ticket"] is None
+    assert inputs.menu_path(fn) == ["Thống kê", "Vi phạm CBTT", "Định kỳ"]
+    assert inputs.screen_names(fn) == ["Vi phạm định kỳ"]
+    with pytest.raises(SystemExit):
+        inputs.find_function(prof, "1E_143")
+
+
+def test_siblings_share_screen_or_code(tmp_path):
     import json
     from reportkit import inputs
-    prof = _mini_profile(tmp_path, {"inputs": {"function_list": {"glob": "list.xlsx", "header_contains": "Link UC",
-                                                                  "columns": {"name": "UC Name", "srs": "Link SRS"}}}})
-    fl = openpyxl.Workbook(); sh = fl.active
-    sh.append(["Link UC", "UC Name", "Link SRS"])
-    sh.append(["J1", "[# 1E_117] Trang nội bộ", "DASHBOARD.xlsx"])
-    sh.append(["J2", "[# 1E_118] Trang công ty đại chúng", "DASHBOARD.xlsx"])
-    sh.append(["J3", "[# 1E_119] Báo cáo khác", "[# 1E_119] Báo cáo khác"])
-    fl.save(os.path.join(prof.tools_dir, "list.xlsx"))
+    prof = _mini_profile(tmp_path, FL_CFG)
+    _function_list(prof, [[117, "IDS", "J1", "[# 1E_117] Trang nội bộ"], [118, "IDS", "J2", "[# 1E_118] Trang CTĐC"],
+                          [119, "IDS", "J3", "[# 1E_119] Báo cáo khác"]])
     root = tmp_path / "w2"
-    for code, files in (("1E_117", ["a.java", "b.sql", "c.ts"]), ("2E_50", ["a.java", "b.sql", "z.ts"]), ("2E_51", ["a.java", "y", "z"])):
+    for code, files, routes in (("1E_117", ["a.ts", "a.html", "z.java"], ["/dashboard"]), ("2E_50", ["a.ts", "a.html", "y.java"], []),
+                                ("2E_51", ["a.ts", "q", "r"], [])):
         (root / code).mkdir(parents=True)
-        (root / code / "trace.json").write_text(json.dumps({"top": [{"file": f} for f in files]}), encoding="utf-8")
+        (root / code / "trace.json").write_text(json.dumps({"top": [{"file": f} for f in files], "routes": routes}), encoding="utf-8")
     fn = inputs.find_function(prof, "1E_118")
-    sibs = inputs.find_siblings(prof, "1E_118", fn, trace={"top": [{"file": f} for f in ["a.java", "b.sql", "c.ts"]]}, workspaces_root=str(root))
+    sibs = inputs.find_siblings(prof, "1E_118", fn, trace={"top": [{"file": f} for f in ["a.ts", "a.html", "x.java"]], "routes": ["/dashboard"]},
+                                workspaces_root=str(root))
     assert [s["code"] for s in sibs] == ["1E_117", "2E_50"]
-    assert any("cùng SRS" in w for w in sibs[0]["why"]) and any("3/3" in w for w in sibs[0]["why"])
+    assert any("cùng màn hình /dashboard" in w for w in sibs[0]["why"]) and sibs[0]["name"] == "[# 1E_117] Trang nội bộ"
+    assert any("2/3" in w for w in sibs[1]["why"])
     assert inputs.find_siblings(prof, "1E_119", inputs.find_function(prof, "1E_119")) == []
+
+
+def test_rules_sheet(tmp_path):
+    from reportkit import workbook as W
+    prof = _mini_profile(tmp_path); ws = prof.workspace("X_1")
+    wb = W.Workbook(prof, ws, name="n", screen="s", ticket="T", ascii_name="N")
+    with pytest.raises(ValueError):
+        wb.sheet_rules([("Phạm vi", "r", "a.sql:1", "kq", "-", "Sai", "", "")], "t", "n")         # verdict not in the list
+    wb.sheet_rules([("Phạm vi", "Chỉ tin đã duyệt", "a.sql:12", "118 công ty", "I.2", "Đúng", "X_1_3", ""),
+                    ("Hiển thị", "Mã sàn hiện tên", "b.java:40", "550 dòng hiện OTC", "III.1", "Lỗi", "BUG-02", "")], "t", "n")
+    s = openpyxl.load_workbook(wb.save())[W.RULE_SHEET]
+    assert [c.value for c in s[4]] == W.RULE_HEADERS
+    assert s["A6"].value == 2 and s["G6"].value == "Lỗi" and s["G6"].fill.fgColor.rgb == W.RED.fgColor.rgb
 
 
 def _tiny_png(path, w=4, h=3):

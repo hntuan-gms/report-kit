@@ -9,9 +9,9 @@ Pick the items that exist on the screen. Each item below is one test case, unles
 
 ## Giao diện chung
 
-- The screen displays the right title, fields, buttons and grid (or "no grid" when the SRS says "Không hiển thị màn hình danh sách"). No error toast appears on open. Check the API calls on open for 4xx.
-- Position in the menu. Compare with the SRS screenshot.
-- Labels and (*) marks. IDS: follow the current system (Quy chuẩn II.1). Audit: follow the report's SRS.
+- The screen displays its title, fields, buttons and grid as the component defines them (`.html`), with no raw i18n key. No error toast appears on open. Check the API calls on open for 4xx.
+- Position and name in the menu: the function list's menu path and the menu definition, in VI and EN. The screen must be reachable from the menu, not only by typing its URL.
+- Labels and (*) marks: a field the component validates as required shows (*), and a field with (*) is validated (Quy chuẩn II.1).
 - Default values and placeholders. Keep what the system does (II.2).
 - One case per dropdown:
   - its values and source, `DELETE_FLG = 0`, and `IPO_COMPANY_FLG = 0` for COMPANY_PROFILES;
@@ -30,9 +30,9 @@ Pick the items that exist on the screen. Each item below is one test case, unles
 ## Giao diện file Excel / Bảng kết quả
 
 - File name. Keep whatever DEV does (IV), so this always passes unless no file is produced.
-- The header block (title, company / period, export date, data years, form number) compared with the SRS.
+- The header block (title, company / period, export date, data years, form number): same title as the screen, and the values chosen in the filters.
 - Column header row. For list reports also check column order and multi-row headers.
-- Rows or indicators listed compared with the SRS, and compared with the source form.
+- Rows or indicators listed: the same as the screen offers (e.g. every indicator chosen), and every one filled from the source form.
 - Cell formatting: borders, wrap, width. Grid alignment: text left, numbers right, STT and dates centred (III.2).
 - Long text is shown in full.
 
@@ -54,14 +54,14 @@ Pick the items that exist on the screen. Each item below is one test case, unles
 - Grid pagination / page size, when the report has a grid.
 - The grid and the file show the same rows and values, for the same filter.
 
-## Chức năng: data. This is the core; derive it from the view + Quy chuẩn I.2.
+## Chức năng: data. This is the core; derive it from the rules of `analysis.md` + Quy chuẩn I.2.
 
 For each rule in the report's view (the WHERE conditions, joins, dedup/ROW_NUMBER, CASE, TO_CHAR), write one case:
 - **Scope of source records:**
   - which forms / NEWS_TYPE_CD / report types count;
   - status: only APPROVED/CLOSE (I.2), with a case where the period has only drafts;
   - language: only VI;
-  - company status (REVOKED / IPO: the report's SRS decides);
+  - company status (REVOKED / IPO: the report's code decides; check that the dropdown, the grid and the file apply the same scope);
   - deleted companies;
   - records with a NULL period / quarter.
 - **Period assignment:**
@@ -73,7 +73,7 @@ For each rule in the report's view (the WHERE conditions, joins, dedup/ROW_NUMBE
   - an approved correction replaces the original, and with N corrections the latest SUBMISSION_DATE wins. Find real chains with PARENT_ID/REF_ID and cite one concrete changed value;
   - an **unapproved** correction (draft / rejected / pending) changes nothing;
   - a correction that blanks a field makes it blank.
-- **Several independent records in one period:** no duplicate rows, and a defined choice. If there is no rule, it becomes a BA question.
+- **Several independent records in one period:** no duplicate rows, and the choice the code makes (latest, highest priority…). F when the choice is not deterministic (rows can swap between two runs) or duplicates appear.
 - **Each output column / indicator group:** the value equals the source. Use one case per group of columns and cite the wrong cells.
 - **Display rules** (III.1):
   - lookup codes are shown as names, and the name still shows when the lookup value has since been deleted;
@@ -84,7 +84,7 @@ For each rule in the report's view (the WHERE conditions, joins, dedup/ROW_NUMBE
   - empty values stay empty (no "null" / "0").
 - **Calculated columns** (totals, ratios, counts, rankings): recompute them from the source rows in SQL and compare. Also check the totals row.
 - **The whole-report comparison:** one case that reports coverage, e.g. "118/118 companies, 1,837 cells, 1,808 match". Run it as data entries with a `matrix` over the whole scope (`rt check`).
-- **Cross-check with sibling reports** that show the same fields (e.g. R017 / R035 for R018). Differences go into the SRS-vs-code sheet.
+- **Cross-check with sibling reports** that show the same fields (e.g. R017 / R035 for R018). A different scope goes into "Quy tắc nghiệp vụ" as `Lưu ý`; two screens showing different values for the same data and the same filter is an F.
 
 ## Chức năng: data permission
 
