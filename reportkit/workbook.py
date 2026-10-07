@@ -16,6 +16,16 @@ Claude writes a short builder script in the workspace:
 A list is written one item per line: steps are numbered "1. ", expected lines get "- ", and in 'actual' the first
 item (the verdict) stays as is and the others get "- ".
 
+Coverage (enforced by save()): every requirement must have a case or a stated reason, otherwise no file is written.
+Requirements are read from the workspace:
+  - analysis.md: every rule line that starts with its id ("R1. ...", "- R2: ...", "| R3 | ..."), id "R1";
+  - probe.md: every "[FOUND] <trap>:" line, id "trap:<trap>";
+  - the checklist areas of test-areas.md (COVERAGE_AREAS, or profile workbook.coverage.areas), id "area:<key>".
+    wb.tc(..., covers=["R4", "trap:lang_twins", "area:bo_loc"])
+    wb.waive("R9", "Không viết case: chức năng chưa nối vào màn hình (đưa vào hand-off)")
+save() writes <workspace>/coverage.md (requirement -> cases or reason) for the hand-off.
+`rt build <code> --check` runs the builder into <workspace>/_check.xlsx with every gate, without using up a version.
+
 Profile block (defaults shown are the KBKT template):
   workbook:
     template: "{tools_dir}/Template Testcase/KBKT_Template.xlsx"
@@ -51,6 +61,57 @@ _JARGON = re.compile(r"\b(?:vd|v\.v|API|view|dedup|NULL|NaN|MATCH|NM|DIFF|CTE|re
 _NAMES = re.compile(r"\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b")      # TABLE_NAME / COLUMN_NAME (not checked in C: steps may type a code)
 _RUN_ID = re.compile(r"\b(?:[DUVP]\d{2}|run \d{8}-\d{6})\b")
 _BUG_ID = re.compile(r"BUG-\d+")
+
+# Coverage gate: the checklist of references/test-areas.md, one key per item a report screen is expected to cover.
+# A key that does not fit the screen is waived with its reason (wb.waive), never silently dropped.
+COVERAGE_AREAS = {
+    "giao_dien": "Bố cục màn hình: tiêu đề, trường lọc, nút, cột lưới, không lỗi khi mở",
+    "dropdown": "Từng dropdown: giá trị, đã xoá, tìm nhanh trên 10 giá trị, thứ tự (Quy chuẩn II.5.1)",
+    "tieng_anh_nhan": "English: tiêu đề, nhãn, nút, giá trị dropdown (Quy chuẩn I.1)",
+    "tieng_anh_du_lieu": "English: dữ liệu lưới và file giữ tiếng Việt (Quy chuẩn I.1)",
+    "file_excel": "File Excel: tiêu đề, cột, định dạng giá trị (Quy chuẩn III.1)",
+    "bo_loc": "Từng bộ lọc trên màn hình lọc đúng và đủ",
+    "khong_co_du_lieu": "Không có dữ liệu: lưới báo Không có dữ liệu, file vẫn có tiêu đề (Quy chuẩn III.2, III.3)",
+    "luoi_va_file": "Lưới và file cùng dòng, cùng giá trị cho cùng bộ lọc",
+    "pham_vi_cong_ty": "Phạm vi công ty: đã xoá, IPO, thu hồi; dropdown, lưới, file cùng phạm vi",
+    "phan_quyen": "Phân quyền dữ liệu: dropdown, lưới, file (Quy chuẩn I.3)",
+    "doi_chieu_man_hinh_khac": "Đối chiếu với màn hình hoặc báo cáo khác dùng cùng dữ liệu",
+    "xss": "An toàn thông tin: XSS (bộ lọc, đường dẫn, dữ liệu trả về)",
+    "sql_injection": "An toàn thông tin: SQL Injection",
+}
+_RULE_LINE = re.compile(r"^\s*(?:[-*]\s+|\|\s*)?\**(R\d+[a-z]?)\**\s*[.:)|]\s*(.*)$")
+_TRAP_LINE = re.compile(r"^\s*-\s*\[FOUND\]\s*([A-Za-z0-9_]+)\s*:\s*(.*)$")
+
+
+def requirements(ws_dir, areas=None):
+    """{id: (source, text)} of everything the workbook must cover: rule ids of analysis.md, FOUND traps of probe.md,
+    checklist areas. analysis.md must exist and number its rules (R1, R2, ...)."""
+    path = os.path.join(ws_dir, "analysis.md")
+    if not os.path.exists(path):
+        raise SystemExit("coverage: %s is missing. Write it first (SKILL.md step 3): every rule on its own line, "
+                         "numbered R1, R2, ..." % path)
+    req = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            m = _RULE_LINE.match(line)
+            if m and m.group(1) not in req:
+                req[m.group(1)] = ("analysis.md", m.group(2).strip()[:140])
+    if not req:
+        raise SystemExit("coverage: analysis.md has no numbered rule. Start each rule line with its id: 'R1. ...'")
+    probe = os.path.join(ws_dir, "probe.md")
+    if os.path.exists(probe):
+        with open(probe, encoding="utf-8") as f:
+            for line in f:
+                m = _TRAP_LINE.match(line)
+                if m and "trap:" + m.group(1) not in req:
+                    req["trap:" + m.group(1)] = ("probe.md", m.group(2).strip()[:140])
+    for k, v in (COVERAGE_AREAS if areas is None else areas).items():
+        req["area:" + k] = ("test-areas.md", v)
+    return req
+
+
+def _as_list(v):
+    return [] if v is None else [v] if isinstance(v, str) else list(v)
 
 
 def set_text(cell, value):
@@ -119,7 +180,10 @@ class Workbook(object):
             raise SystemExit("Workbook template not found: %s (profile workbook.template)" % tpl)
         fname = cfg.get("file_name", "{ticket}_{code_nodash}_{ascii_name}_v{version}.xlsx").format(
             ticket=ticket, code=ws.code, code_nodash=ws.code.replace("_", ""), ascii_name=ascii_name or ws.code, version=version)
-        self.out = out or os.path.join(prof.expand(cfg.get("out_dir", "{tools_dir}")), fname)
+        check_out = os.environ.get("RK_WB_OUT")                  # `rt build --check`: a scratch file in the workspace
+        self.out = out or check_out or os.path.join(prof.expand(cfg.get("out_dir", "{tools_dir}")), fname)
+        if check_out and self.out == check_out and os.path.exists(check_out):
+            os.remove(check_out)
         if os.path.exists(self.out):
             raise SystemExit("%s already exists. Never overwrite a delivered version - use version=%d." % (self.out, version + 1))
         f = cfg.get("font", "Times New Roman")
@@ -132,6 +196,10 @@ class Workbook(object):
         self.st = {k: cap(r) for k, r in rows.items()}
         self.first = int(cfg.get("first_row", 12))
         self.cases = []                       # (row, purpose) of every tc()
+        self.covered = {}                     # requirement id -> [row, ...]
+        self.waived = {}                      # requirement id -> reason
+        cov = cfg.get("coverage") or {}
+        self.areas = cov.get("areas") if isinstance(cov.get("areas"), dict) else None
         self.pre_h = sh.row_dimensions[rows.get("pre", 13)].height
         for m in [str(m) for m in sh.merged_cells.ranges if m.min_row >= self.first]:
             sh.unmerge_cells(m)
@@ -173,9 +241,16 @@ class Workbook(object):
     def pre(self, t):
         r = self._put("pre", t, merge=True); self.ws.row_dimensions[r].height = self.pre_h
 
-    def tc(self, purpose, steps, expected, basis=None, status=None, actual=None, bug=None, run=1):
+    def waive(self, req_id, reason):
+        """A requirement with no case, and why (it goes to coverage.md and the hand-off, not to the sheet)."""
+        if not reason or len(str(reason).strip()) < 10:
+            raise ValueError("waive(%r): give the reason in a sentence" % req_id)
+        self.waived[req_id] = str(reason).strip()
+
+    def tc(self, purpose, steps, expected, basis=None, status=None, actual=None, bug=None, run=1, covers=None):
         """steps / expected / actual / basis: a string, or a list written one item per line (see the module doc).
-        bug: optional, the tracker's bug id once the Tester has logged it."""
+        bug: optional, the tracker's bug id once the Tester has logged it.
+        covers: requirement ids this case covers ("R3", "trap:lang_twins", "area:bo_loc"), see the module doc."""
         steps = _lines(steps, number=True)
         expected = _lines(expected, bullet=True)
         if isinstance(actual, (list, tuple)):
@@ -192,7 +267,40 @@ class Workbook(object):
         if bug:
             self.ws.cell(r, 9).value = bug
         self.cases.append((r, purpose))
+        for c in _as_list(covers):
+            self.covered.setdefault(c, []).append(r)
         return r
+
+    def coverage(self):
+        """(requirements, missing ids, unknown ids used in covers / waive)."""
+        req = requirements(self.space.dir, self.areas)
+        used = set(self.covered) | set(self.waived)
+        missing = [k for k in req if k not in used]
+        unknown = sorted(k for k in used if k not in req)
+        return req, missing, unknown
+
+    def _write_coverage(self, req, missing, unknown):
+        sh, hdr = self.ws, self.first - 1
+        code = sh[self.code_cell].value
+        purpose = dict(self.cases)
+        n_case = sum(1 for k in req if k in self.covered)
+        n_wv = sum(1 for k in req if k not in self.covered and k in self.waived)
+        lines = ["# Coverage %s: %d requirements, %d by cases, %d without a case (reason), %d missing" %
+                 (code, len(req), n_case, n_wv, len(missing)), "",
+                 "| Requirement | Source | What | Covered by / reason |", "|---|---|---|---|"]
+        for k, (src, text) in req.items():
+            if k in self.covered:
+                how = "; ".join("%s %s" % (_case_id(sh, hdr, code, r), purpose.get(r, "")) for r in self.covered[k])
+            elif k in self.waived:
+                how = "Không có case: " + self.waived[k]
+            else:
+                how = "**MISSING**"
+            lines.append("| %s | %s | %s | %s |" % (k, src, text.replace("|", "/"), how.replace("|", "/")))
+        if unknown:
+            lines += ["", "Unknown ids used in covers / waive (typo?): " + ", ".join(unknown)]
+        with open(os.path.join(self.space.dir, "coverage.md"), "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        return lines[0]
 
     def finish(self, run_date, run_note, author="", run=1):
         sh, last, f = self.ws, self.row - 1, self.first
@@ -212,6 +320,15 @@ class Workbook(object):
         return last
 
     def save(self):
+        req, missing, unknown = self.coverage()
+        head = self._write_coverage(req, missing, unknown)
+        if missing or unknown:
+            msg = [head.lstrip("# "), "No file written. Add a case (tc(..., covers=[...])) or wb.waive(id, reason) for:"]
+            msg += ["  %s (%s): %s" % (k, req[k][0], req[k][1]) for k in missing]
+            if unknown:
+                msg.append("  unknown ids in covers / waive (typo?): " + ", ".join(unknown))
+            msg.append("Details: %s" % os.path.join(self.space.dir, "coverage.md"))
+            raise SystemExit("\n".join(msg))
         self.wb.active = 0
         os.makedirs(os.path.dirname(self.out), exist_ok=True)
         self.wb.save(self.out)

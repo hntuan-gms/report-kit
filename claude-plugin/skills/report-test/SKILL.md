@@ -83,7 +83,8 @@ Do the steps in order and don't skip one. Each step leaves files in the workspac
    - Note every data rule (WHERE, JOIN, dedup, CASE, date bounds, status and language filters, permission join) and every display rule (labels, number formats, i18n), each with `file:line`.
    - Write `<workspace>/analysis.md`, the function as built:
      - the screen: every field (type, default, required, values and where they come from), button, grid column, file column;
-     - the rules, one line each, **in plain words** ("chỉ lấy tin đã duyệt, tiếng Việt; bản đính chính mới nhất thay bản gốc") with `file:line`;
+     - the rules, one line each, **in plain words** ("chỉ lấy tin đã duyệt, tiếng Việt; bản đính chính mới nhất thay bản gốc") with `file:line`.
+       **Start each rule line with its id: `R1. ...`, `R2. ...`.** The ids are the requirements the coverage gate of `rt build` checks;
      - for each rule, the Quy chuẩn section it falls under, and whether it already looks wrong by 1-4 above;
      - functions that are half built (code present but not wired), for the hand-off message.
    - For a large report, delegate the tracing to an Explore agent and keep only its conclusions.
@@ -126,9 +127,14 @@ Do the steps in order and don't skip one. Each step leaves files in the workspac
    - **One sheet only: the test cases.** No rules / bug list / pictures / details / coverage sheets: Testers and BAs read only the test case sheet.
    - **Write it for a Tester / BA** (`output-format.md`, "Writing for a Tester / BA"): one case per check and per bug, one idea per line, words not symbols, names as the screen shows them. H starts with the verdict, then `Ví dụ` / `Phạm vi` / `Nguyên nhân`. Pass lists to `wb.tc()`.
    - **It always ends with "An toàn thông tin"** (XSS + SQL Injection, `references/test-areas.md`), measured in step 7 like any other entry.
-   - **Complete = every requirement has a case.** Before building, go through `analysis.md` (every screen element and rule), the FOUND traps of `probe.md` and the checklist of `test-areas.md`; add the missing cases. What stays without a case goes in the hand-off, with why.
+   - **Complete = every requirement has a case. `rt build` enforces it** and writes no file while one is missing:
+     - the requirements are the rule ids of `analysis.md` (`R1`...), the FOUND traps of `probe.md` (`trap:<name>`) and the checklist areas of `test-areas.md` (`area:<key>`);
+     - tag each case with what it covers: `wb.tc(..., covers=["R4", "trap:lang_twins", "area:bo_loc"])`. A rule branch with no data still gets its own case ("Chưa thực hiện - cần dữ liệu");
+     - a requirement with no case gets `wb.waive("R9", "reason")`; the reasons go in the hand-off, never in the sheet;
+     - run `rt build <code> --check` first: it builds `<workspace>/_check.xlsx` with every gate and uses up no version. `coverage.md` in the workspace lists requirement -> case or reason.
+     - The gate checks that every requirement is named, not that the case is right: still re-read each P whose claim covers several years or periods (e.g. a deadline in a year with no holiday calendar).
    - The file name comes from the profile. Never overwrite a delivered version: bump `version`.
-   - `rt build` runs the quality gate: every case has a concrete H, no row is hidden, and the wording check (verdict first, no line over 160 characters, no symbols or internal names in B C D H, no run id in J, one bug per case). Fix every line it lists and rebuild.
+   - `rt build` runs the quality gate: coverage (above), every case has a concrete H, no row is hidden, and the wording check (verdict first, no line over 160 characters, no symbols or internal names in B C D H, no run id in J, one bug per case). Fix every line it lists and rebuild.
 
 10. **Hand off** (`output-format.md`, "Hand-off message"): audience line, path, counts, data comparison in one line, bugs one line each, what was not run, what changed, requirements without a case, half-built functions.
 

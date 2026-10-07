@@ -6,7 +6,8 @@
   rt login [--system S]        log in through the real SSO page, save the session
   rt probe <code> [--tables]   run the profile's data traps on the report's tables -> probe.md
   rt check <code> [--only ids] [--redo] [--kind data|ui]    run checks.yaml -> runs/<id>/summary.md
-  rt build <code>              run the workspace's build_workbook.py, then the quality gate (results, hidden rows, wording)
+  rt build <code> [--check]    run the workspace's build_workbook.py, then the quality gate (coverage, results, hidden rows,
+                               wording); --check builds <workspace>/_check.xlsx only, so a failing gate costs no version
   rt status <code>             what is done, what is next
   rt sql "<SELECT ...>"        one read-only query (SELECT only)
   rt api GET /path [--params '{...}']   one call to a read-only endpoint, JSON printed
@@ -195,14 +196,24 @@ def cmd_build(a):
     if not os.path.exists(script):
         raise SystemExit("Write %s first (see references/output-format.md)" % script)
     env = dict(os.environ, PYTHONIOENCODING="utf-8", RK_PROFILE=prof.dir)
+    env.pop("RK_WB_OUT", None)
+    if getattr(a, "check", False):
+        env["RK_WB_OUT"] = os.path.join(ws.dir, "_check.xlsx")
     r = subprocess.run([sys.executable, script], cwd=ws.dir, env=env, capture_output=True, text=True, encoding="utf-8")
     _out(r.stdout.strip()); _out(r.stderr.strip()) if r.returncode else None
     if r.returncode:
         raise SystemExit(r.returncode)
     out = r.stdout.strip().splitlines()[-1] if r.stdout.strip() else ""
+    cov = os.path.join(ws.dir, "coverage.md")
+    if os.path.exists(cov):
+        with open(cov, encoding="utf-8") as f:
+            _out("coverage: %s (%s)" % (f.readline().strip().lstrip("# "), cov))
     if out.endswith(".xlsx") and os.path.exists(out):
         first = int(prof.get("workbook.first_row", 12))
         ok = _gate(out, first, (prof.get("workbook.header_cells") or {}).get("code", "D3"))
+        if getattr(a, "check", False):
+            _out("quality gate (check only, nothing delivered): %s" % ("OK - run rt build without --check" if ok else "FAIL - fix the lines above"))
+            return
         _out("quality gate: %s" % ("OK" if ok else "FAIL - fix the lines above, then bump version and rebuild"))
         ws.mark("build", file=out, gate_ok=ok)
 
@@ -285,7 +296,8 @@ def main(argv=None):
     x = sp.add_parser("probe"); x.add_argument("code"); x.add_argument("--tables"); x.add_argument("--schema", default="default"); x.set_defaults(f=cmd_probe)
     x = sp.add_parser("check"); x.add_argument("code"); x.add_argument("--only"); x.add_argument("--redo", action="store_true")
     x.add_argument("--kind", choices=["data", "ui"]); x.add_argument("--label"); x.add_argument("--print", action="store_true"); x.set_defaults(f=cmd_check)
-    x = sp.add_parser("build"); x.add_argument("code"); x.set_defaults(f=cmd_build)
+    x = sp.add_parser("build"); x.add_argument("code")
+    x.add_argument("--check", action="store_true", help="build <workspace>/_check.xlsx and run the gates; no version used up"); x.set_defaults(f=cmd_build)
     x = sp.add_parser("status"); x.add_argument("code"); x.set_defaults(f=cmd_status)
     x = sp.add_parser("sql"); x.add_argument("sql"); x.add_argument("--schema", default="default"); x.add_argument("--limit", type=int, default=50); x.set_defaults(f=cmd_sql)
     x = sp.add_parser("api"); x.add_argument("method"); x.add_argument("path"); x.add_argument("--params"); x.add_argument("--body")

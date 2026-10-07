@@ -206,7 +206,7 @@ def test_engine_rejects_duplicate_ids(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------- workbook
-def _mini_profile(tmp_path, extra=None):
+def _mini_profile(tmp_path, extra=None, areas=None):
     tools = tmp_path / "tools"; tools.mkdir(exist_ok=True)
     tpl = openpyxl.Workbook(); sh = tpl.active
     sh["D3"] = "X_1"; sh["B10"] = "Mục đích"; sh["D10"] = "Kết quả mong muốn"
@@ -214,7 +214,8 @@ def _mini_profile(tmp_path, extra=None):
     d = tmp_path / ".report-kit"; d.mkdir(exist_ok=True)
     cfg = {"name": "demo", "paths": {"tools_dir": str(tools), "work_root": str(tmp_path / "w")},
            "systems": {"a": {"web": "http://a", "api": "http://a/api"}},
-           "workbook": {"template": str(tools / "tpl.xlsx"), "out_dir": str(tmp_path / "out")}}
+           "workbook": {"template": str(tools / "tpl.xlsx"), "out_dir": str(tmp_path / "out"),
+                        "coverage": {"areas": {} if areas is None else areas}}}
     cfg.update(extra or {})
     (d / "project.yaml").write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
     return P.load(str(d))
@@ -280,13 +281,18 @@ def test_siblings_share_screen_or_code(tmp_path):
 
 
 
+def _analysis(ws, text="# a\nR1. Chỉ lấy tin đã duyệt\n"):
+    with open(os.path.join(ws.dir, "analysis.md"), "w", encoding="utf-8") as f:
+        f.write(text)
+
+
 def test_workbook_is_one_sheet_and_lists_become_lines(tmp_path):
     from reportkit import workbook as W
-    prof = _mini_profile(tmp_path); ws = prof.workspace("X_1")
+    prof = _mini_profile(tmp_path); ws = prof.workspace("X_1"); _analysis(ws)
     wb = W.Workbook(prof, ws, name="n", screen="s", ticket="T", ascii_name="N")
     wb.chapter("Chức năng 1"); wb.cat("Giao diện")
     r = wb.tc("Kiểm tra A", ["Chọn Năm = 2026", "Bấm [Tìm kiếm]"], ["Ý 1", "Ý 2"], basis="Căn cứ: thiết kế chức năng",
-              status="F", actual=["Sai.", "Ví dụ: công ty A hiện 0, đúng ra là 45.", "Nguyên nhân: chưa tính lại."])
+              status="F", actual=["Sai.", "Ví dụ: công ty A hiện 0, đúng ra là 45.", "Nguyên nhân: chưa tính lại."], covers="R1")
     wb.finish(run_date="06/10/2026", run_note="n")
     book = openpyxl.load_workbook(wb.save())
     assert len(book.sheetnames) == 1
@@ -297,11 +303,11 @@ def test_workbook_is_one_sheet_and_lists_become_lines(tmp_path):
 
 def test_readability_gate(tmp_path):
     from reportkit import workbook as W
-    prof = _mini_profile(tmp_path); ws = prof.workspace("X_1")
+    prof = _mini_profile(tmp_path); ws = prof.workspace("X_1"); _analysis(ws)
     wb = W.Workbook(prof, ws, name="n", screen="s", ticket="T", ascii_name="N")
     wb.chapter("Chức năng 1"); wb.cat("Chức năng")
     wb.tc("Kiểm tra Điểm", "1. Bấm [Tìm kiếm]", "Điểm = 100 trừ điểm bị trừ", status="P",
-          actual=["Đạt.", "Ví dụ: công ty BMK kỳ 08/2026 hiện 70, khớp."], basis="Căn cứ: thiết kế chức năng")       # clean
+          actual=["Đạt.", "Ví dụ: công ty BMK kỳ 08/2026 hiện 70, khớp."], basis="Căn cứ: thiết kế chức năng", covers=["R1"])  # clean
     wb.tc("Kiểm tra Phân loại", "1. Bấm [Tìm kiếm]", "A ≥ 90", status="F",
           actual="Sai. 222.032 ô so sánh, vd AMD", bug="BUG-01, BUG-02", basis="Căn cứ: x\nKỹ thuật: D01, EVALUATIONS.TYPE")
     wb.tc("Kiểm tra tổng", "1. Bấm [Tìm kiếm]", "Tổng khớp", status="P", actual="Sai. " + "x" * 200)
@@ -316,3 +322,69 @@ def test_readability_gate(tmp_path):
     three = [(c, why) for cid, c, why in got if cid == "X_1_3"]
     assert any(c == "H" and why.startswith("must start with 'Đạt.'") for c, why in three)
     assert any(c == "H" and "160" in why for c, why in three)
+
+
+def test_coverage_gate_blocks_until_every_requirement_has_a_case_or_reason(tmp_path):
+    from reportkit import workbook as W
+    areas = {"bo_loc": "Từng bộ lọc", "xss": "XSS"}
+    prof = _mini_profile(tmp_path, areas=areas); ws = prof.workspace("X_1")
+    _analysis(ws, "# Quy tắc\nR1. Chỉ lấy tin đã duyệt\n- R2: Bản đính chính mới nhất thay bản gốc\n"
+                  "| R3 | Hạn nộp theo ngày làm việc |\nKhông phải quy tắc: (R4) nằm giữa dòng\n")
+    with open(os.path.join(ws.dir, "probe.md"), "w", encoding="utf-8") as f:
+        f.write("## T\n- [FOUND] lang_twins: Bản VI và EN song song\n- [none] orphan_company: x\n")
+    req = W.requirements(ws.dir, areas)
+    assert list(req) == ["R1", "R2", "R3", "trap:lang_twins", "area:bo_loc", "area:xss"]
+
+    def build(version, waive_all):
+        wb = W.Workbook(prof, ws, name="n", screen="s", ticket="T", ascii_name="N", version=version)
+        wb.chapter("Chức năng 1"); wb.cat("Chức năng")
+        wb.tc("Kiểm tra trạng thái", "1. Bấm [Tìm kiếm]", "Chỉ tin đã duyệt", status="P", actual="Đạt. Khớp.",
+              covers=["R1", "trap:lang_twins", "area:bo_loc"])
+        wb.tc("Kiểm tra hạn nộp", "1. Bấm [Tìm kiếm]", "Hạn đúng", actual="Chưa thực hiện - cần dữ liệu", covers="R3")
+        if waive_all:
+            wb.waive("R2", "Không có chuỗi đính chính trên môi trường")
+            wb.waive("area:xss", "Màn hình không có ô nhập chữ nào")
+        wb.finish(run_date="07/10/2026", run_note="n")
+        return wb.save()
+
+    with pytest.raises(SystemExit) as e:
+        build(1, waive_all=False)
+    assert "R2" in str(e.value) and "area:xss" in str(e.value) and "No file written" in str(e.value)
+    assert not os.path.exists(tmp_path / "out" / "T_X1_N_v1.xlsx")                # the version is not used up
+    out = build(1, waive_all=True)
+    assert os.path.exists(out)
+    cov = open(os.path.join(ws.dir, "coverage.md"), encoding="utf-8").read()
+    assert "6 requirements, 4 by cases, 2 without a case (reason), 0 missing" in cov
+    assert "X_1_1 Kiểm tra trạng thái" in cov and "Không có case: Không có chuỗi đính chính" in cov
+
+    wb = W.Workbook(prof, ws, name="n", screen="s", ticket="T", ascii_name="N", version=2)
+    wb.tc("Kiểm tra", "1. a", "b", status="P", actual="Đạt. x",
+          covers=["R1", "R2", "R3", "trap:lang_twins", "area:bo_loc", "area:xss", "R9"])
+    with pytest.raises(SystemExit) as e:                                         # typo / unknown id
+        wb.save()
+    assert "unknown ids" in str(e.value) and "R9" in str(e.value)
+    with pytest.raises(ValueError):
+        wb.waive("R2", "")
+
+
+def test_coverage_needs_numbered_analysis(tmp_path):
+    from reportkit import workbook as W
+    prof = _mini_profile(tmp_path); ws = prof.workspace("X_1")
+    with pytest.raises(SystemExit):
+        W.requirements(ws.dir)                                                   # no analysis.md
+    _analysis(ws, "# a\nChỉ lấy tin đã duyệt, không đánh số\n")
+    with pytest.raises(SystemExit):
+        W.requirements(ws.dir)
+
+
+def test_build_check_writes_scratch_file(tmp_path, monkeypatch):
+    from reportkit import workbook as W
+    prof = _mini_profile(tmp_path); ws = prof.workspace("X_1"); _analysis(ws)
+    scratch = os.path.join(ws.dir, "_check.xlsx")
+    monkeypatch.setenv("RK_WB_OUT", scratch)
+    for _ in range(2):                                                           # re-runnable: the scratch file is replaced
+        wb = W.Workbook(prof, ws, name="n", screen="s", ticket="T", ascii_name="N", version=1)
+        wb.tc("Kiểm tra", "1. a", "b", status="P", actual="Đạt. x", covers="R1")
+        wb.finish(run_date="07/10/2026", run_note="n")
+        assert wb.save() == scratch
+    assert not os.path.exists(tmp_path / "out")

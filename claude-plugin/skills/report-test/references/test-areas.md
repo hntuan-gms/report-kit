@@ -7,6 +7,25 @@ one third Giao diện and two thirds Chức năng, with most of Chức năng bei
 
 Pick the items that exist on the screen. Each item below is one test case, unless it says otherwise.
 
+**Coverage gate keys.** `rt build` requires every area below to be covered by a case (`covers=["area:<key>"]`) or waived
+with its reason (`wb.waive("area:<key>", "...")`). Citing a sibling workbook's case counts as a case.
+
+| Key | Area |
+|---|---|
+| `area:giao_dien` | Screen layout: title, filters, buttons, grid columns, no error on open |
+| `area:dropdown` | Each dropdown: values, deleted values, quick search over 10 values, order (II.5.1) |
+| `area:tieng_anh_nhan` | English: title, labels, buttons, dropdown values (I.1) |
+| `area:tieng_anh_du_lieu` | English: grid and file data stay Vietnamese (I.1) |
+| `area:file_excel` | Excel file: title, columns, value formats (III.1) |
+| `area:bo_loc` | Every filter on the screen filters right and completely |
+| `area:khong_co_du_lieu` | No data: grid says so, file keeps its headers (III.2, III.3) |
+| `area:luoi_va_file` | Grid and file: same rows, same values for the same filter |
+| `area:pham_vi_cong_ty` | Company scope: deleted, IPO, revoked; dropdown, grid and file agree |
+| `area:phan_quyen` | Data permission: dropdown, grid, file (I.3) |
+| `area:doi_chieu_man_hinh_khac` | Cross-check with sibling screens or reports that show the same data |
+| `area:xss` | Security: XSS (filters, URL, returned data) |
+| `area:sql_injection` | Security: SQL Injection |
+
 ## Giao diện chung
 
 - The screen displays its title, fields, buttons and grid as the component defines them (`.html`), with no raw i18n key. No error toast appears on open. Check the API calls on open for 4xx.

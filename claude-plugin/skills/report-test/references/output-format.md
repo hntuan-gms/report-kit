@@ -136,18 +136,26 @@ wb = W.Workbook(prof, ws, name="Trang tổng hợp CBTT nội bộ", screen="[# 
                 ticket="AI-23", ascii_name="TrangTongHopCongBoThongTinNoiBo", version=2)
 wb.chapter("Chức năng 1: ..."); wb.pre("1. Đăng nhập ...\n2. Menu >> ...")
 wb.cat("Giao diện"); wb.sub("Giao diện chung")
-wb.tc(purpose, [steps], [expected], basis="Căn cứ: ...", status="P", actual=["Đạt.", "Ví dụ: ..."])
+wb.tc(purpose, [steps], [expected], basis="Căn cứ: ...", status="P", actual=["Đạt.", "Ví dụ: ..."],
+      covers=["R3", "trap:lang_twins", "area:bo_loc"])     # requirement ids this case covers
 ...
+wb.waive("area:xss", "Màn hình không có ô nhập chữ nào")    # a requirement with no case, and why (goes to the hand-off)
 wb.finish(run_date="dd/mm/yyyy", run_note="Thời gian: ...\nNgười thực hiện: ...\nBản build: ...")
 print(wb.save())          # the last printed line must be the file path (rt build reads it)
 ```
 Always write cells through `tc()`: text starting with "=" is kept as text there.
+
+**Coverage gate.** `save()` writes no file while a requirement has neither a case (`covers=`) nor a reason (`waive()`), or while
+`covers` / `waive` names an id that does not exist (typo). Requirements: the `R<n>` rule lines of `analysis.md`, the
+`[FOUND]` traps of `probe.md` (`trap:<name>`), and the checklist areas (`area:<key>`, list in `test-areas.md`; a profile can
+replace it with `workbook.coverage.areas`). Each save writes `<workspace>/coverage.md`: requirement -> case ids or reason.
+Run `rt build <code> --check` until it passes (it builds `<workspace>/_check.xlsx`, uses up no version), then `rt build <code>`.
 An older `build_workbook.py` that calls `wb.sheet_*` or `reportkit.evidence` no longer runs: delete those calls.
 
 ## Hand-off message to the user
 
 - One line naming the audience ("Written for: …").
-- The path, and the counts per section (P / F / PE / not run) that `rt build` prints.
+- The path, and the counts per section (P / F / PE / not run) that `rt build` prints, and its coverage line.
 - The data comparison in one line: how many companies / rows / periods, how many wrong.
 - The bugs, one line each with one concrete example.
 - What could not be run and why; what changed since the previous version.
