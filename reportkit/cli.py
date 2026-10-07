@@ -123,6 +123,17 @@ def cmd_start(a):
     L += ["", "## Inputs"]
     L.append("- standard: %s" % (("%s -> %s" % (std_doc, std_out)) if std_doc else "document not found; profile summary %s" % std_sum))
     L += ["- previous workbook: %s -> %s (%d reviewer comments)" % x for x in prev_out] or ["- previous workbook: none"]
+    gkey = inputs.group_key(fn)
+    gpath = inputs.group_conventions(prof, gkey)
+    if not gkey:
+        L.append("- group: not given in the function list - no group conventions; decide as BA in the closest group's file")
+    elif os.path.exists(gpath):
+        items = inputs.convention_items(gpath)
+        L.append("- group %s conventions (decided by Claude as BA, read before judging): %s (%d items: %s)" % (
+            gkey, gpath, len(items), ", ".join(items) or "none"))
+    else:
+        L.append("- group %s conventions: none yet. At the first decision you take as BA, create %s "
+                 "(SKILL.md 'Acting as BA')" % (gkey, gpath))
     sibs = inputs.find_siblings(prof, code, fn, trace=t, workspaces_root=os.path.dirname(ws.dir))
     if sibs:
         L += ["", "## Sibling reports - SAME SCREEN OR SAME CODE: test the difference, don't copy",
@@ -138,7 +149,8 @@ def cmd_start(a):
     brief = "\n".join(L)
     with open(ws.p("brief.md"), "w", encoding="utf-8") as f:
         f.write(brief)
-    ws.mark("start", std=std_doc, prev=[x[0] for x in prev_out], siblings=[s["code"] for s in sibs], trace=t.get("method"))
+    ws.mark("start", std=std_doc, prev=[x[0] for x in prev_out], siblings=[s["code"] for s in sibs], trace=t.get("method"),
+            group=gkey)
     _out(brief)
 
 
@@ -210,7 +222,7 @@ def cmd_build(a):
             _out("coverage: %s (%s)" % (f.readline().strip().lstrip("# "), cov))
     if out.endswith(".xlsx") and os.path.exists(out):
         first = int(prof.get("workbook.first_row", 12))
-        ok = _gate(out, first, (prof.get("workbook.header_cells") or {}).get("code", "D3"))
+        ok = _gate(out, first, (prof.get("workbook.header_cells") or {}).get("code", "D3"), prof=prof)
         if getattr(a, "check", False):
             _out("quality gate (check only, nothing delivered): %s" % ("OK - run rt build without --check" if ok else "FAIL - fix the lines above"))
             return
@@ -218,9 +230,9 @@ def cmd_build(a):
         ws.mark("build", file=out, gate_ok=ok)
 
 
-def _gate(path, first=12, code_cell="D3"):
+def _gate(path, first=12, code_cell="D3", prof=None):
     """Print the checks of the test case sheet; True when nothing blocks."""
-    from . import workbook
+    from . import workbook, inputs
     counts, bad = workbook.tally(path, first)
     _out("counts: %s\nrows with empty / status-only 'Kết quả hiện tại': %s" % (counts, bad))
     hid = workbook.hidden_rows(path, first)
@@ -229,7 +241,22 @@ def _gate(path, first=12, code_cell="D3"):
     _out("wording for a Tester / BA reader: %s" % ("OK" if not rd else "%d problems" % len(rd)))
     for cid, col, why in rd:
         _out("  %s %s: %s" % (cid, col, why))
-    return not bad and not hid and not rd
+    refs, pre_ok = workbook.convention_refs(path, first, code_cell)
+    conv = []
+    for cid, grp, item in refs:
+        gpath = inputs.group_conventions(prof, grp) if prof else None
+        if not gpath or not os.path.exists(gpath):
+            conv.append("%s J: cites group %s, but %s does not exist" % (cid, grp, gpath))
+        elif item not in inputs.convention_items(gpath):
+            conv.append("%s J: cites %s %s, not an item of %s" % (cid, grp, item, gpath))
+    if refs and not pre_ok:
+        conv.append("precondition row: cases cite group conventions, so it must say they were set by the tester "
+                    "pending BA review ('Quy ước kiểm thử nhóm ...')")
+    _out("group conventions cited: %s" % ("%d cases, OK" % len(refs) if refs and not conv else
+                                          "none" if not refs else "%d problems" % len(conv)))
+    for x in conv:
+        _out("  " + x)
+    return not bad and not hid and not rd and not conv
 
 
 def cmd_status(a):

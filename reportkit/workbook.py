@@ -383,6 +383,23 @@ def readability(path, first_row=12, code_cell="D3"):
     return out
 
 
+_CONV_REF = re.compile(r"Quy ước kiểm thử nhóm\s+([^\s,;]+)\s+mục\s+([^\s,;.)]+)")
+
+
+def convention_refs(path, first_row=12, code_cell="D3"):
+    """([(case id, group, item)] cited in column J, whether a non-case row (chapter / precondition) says who set the
+    group conventions). Cited as 'Căn cứ: Quy ước kiểm thử nhóm 1D.I mục Q2'."""
+    sh = openpyxl.load_workbook(path).worksheets[0]
+    code, hdr, refs, pre_ok = sh[code_cell].value, first_row - 1, [], False
+    for r in range(first_row, sh.max_row + 1):
+        if sh.cell(r, 4).value is None:
+            pre_ok = pre_ok or "Quy ước kiểm thử nhóm" in str(sh.cell(r, 2).value or "")
+            continue
+        for m in _CONV_REF.finditer(str(sh.cell(r, 10).value or "")):
+            refs.append((_case_id(sh, hdr, code, r), m.group(1), m.group(2)))
+    return refs, pre_ok
+
+
 def hidden_rows(path, first_row=12):
     """Rows of the test case sheet that Excel will not show (hidden rows or collapsed groups) - quality gate."""
     sh = openpyxl.load_workbook(path).worksheets[0]

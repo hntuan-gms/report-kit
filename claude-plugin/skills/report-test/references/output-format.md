@@ -75,6 +75,7 @@ The first that applies:
 | Basis | Wording |
 |---|---|
 | The Quy chuẩn covers it | `Căn cứ: Quy chuẩn chung TC-TK mục II.5.1` |
+| A group convention settles it (decided acting as BA) | `Căn cứ: Quy ước kiểm thử nhóm 1D.I mục Q2`. Also add the line "Điểm Quy chuẩn chung không quy định: theo Quy ước kiểm thử nhóm 1D.I (người kiểm thử đặt thay BA, chờ BA rà lại)" to the precondition row. `rt build` checks both. |
 | The system contradicts itself | `Căn cứ: lưới và file Excel phải thống nhất` / `Căn cứ: trường bắt buộc phải có dấu (*)` |
 | Plain correctness | `Căn cứ: ràng buộc dữ liệu - số kiểm toán viên không thể âm` / `Căn cứ: "Đến ngày" gồm cả ngày cuối` |
 | Runtime error | `Căn cứ: chức năng phải chạy không lỗi` |
@@ -156,6 +157,7 @@ An older `build_workbook.py` that calls `wb.sheet_*` or `reportkit.evidence` no 
 
 - One line naming the audience ("Written for: …").
 - The path, and the counts per section (P / F / PE / not run) that `rt build` prints, and its coverage line.
+- The group conventions you added or changed acting as BA (Qn, one line each), so the PIC can pass them to the real BA.
 - The data comparison in one line: how many companies / rows / periods, how many wrong.
 - The bugs, one line each with one concrete example.
 - What could not be run and why; what changed since the previous version.

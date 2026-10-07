@@ -251,6 +251,35 @@ def find_standard(profile):
     return (docs[0] if docs else None), (summ if summ and os.path.exists(summ) else None)
 
 
+_GROUP = re.compile(r"#\s*(\d[A-Z](?:\.[IVX]+(?:\.\d+)*)?)\s*_")
+_CONV_ITEM = re.compile(r"^\|\s*(Q\d+)\s*\|\s*([^|]*)\|")
+
+
+def group_key(fn):
+    """'# 1D.I_NHÓM CHỨC NĂNG ...' -> '1D.I' (None when the function list gives no group, e.g. '#N/A')."""
+    m = _GROUP.search(str((fn or {}).get("group") or ""))
+    return m.group(1) if m else None
+
+
+def group_conventions(profile, key):
+    """Path of the group's conventions file (rules/groups/<key>.md, or profile rules.groups), whether or not it exists."""
+    if not key:
+        return None
+    return os.path.join(profile.path(profile.get("rules.groups") or "rules/groups"), "%s.md" % key)
+
+
+def convention_items(path):
+    """{'Q1': 'decision text', ...} of a conventions file (table rows '| Qn | decision | ...')."""
+    out = {}
+    if path and os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                m = _CONV_ITEM.match(line.strip())
+                if m:
+                    out[m.group(1)] = " ".join(m.group(2).split())
+    return out
+
+
 def find_previous(profile, code):
     pat = profile.get("inputs.previous_workbooks")
     if not pat:

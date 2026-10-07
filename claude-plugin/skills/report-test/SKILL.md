@@ -12,13 +12,17 @@ Arguments: `$ARGUMENTS` (the report code; anything else is a note from the user)
 - `rt` (the reportkit CLI) does the mechanical work: find the function row, trace the code from the menu, log in, probe data, run the observation and comparison steps, build the workbook.
 - **Claude does the judging.** The kit never decides P / F. Claude reads what the screen showed and what the data comparison found, and judges it with the rules below, on every run.
 
-The project profile is `.report-kit/` in the repo. Its `rules/` folder holds the project standard summary, environment notes, lessons and data traps.
+The project profile is `.report-kit/` in the repo. Its `rules/` folder holds:
+- the project standard summary (the Quy chuẩn chung, for every test case);
+- `groups/<group>.md`, the conventions of each function group, which Claude decides acting as BA;
+- environment notes, lessons and data traps.
 
 ## What a verdict is based on
 
 No SRS is read. The deployed system and its code describe what the function does; the workbook checks that it does it correctly and consistently. In this order:
 
 1. **Quy chuẩn chung** (the project standard: the original document if found, otherwise `.report-kit/rules/standard.md`). It overrides the code on everything it covers.
+1b. **The group's conventions** (`rules/groups/<group>.md`): points the Quy chuẩn chung does not settle for this function group, decided by Claude acting as BA (see "Acting as BA"). They override the code on what they cover and never contradict the Quy chuẩn chung.
 2. **The system contradicting itself**: grid vs Excel file for the same filter, screen vs API, a column label vs the data in it, VI vs EN, totals vs details, page 1 vs page 2, a field the code validates as required but shows without (*), a filter the screen sends but the server ignores.
 3. **Plain correctness that holds for any business rule.** Claude may judge these on its own: a count can't be negative, shares add up to 100 %, "Đến ngày" includes the whole last day, no duplicate rows from a join or a language twin, a dropdown lists every value it says it lists, a code is shown as its name, nothing is silently truncated, an i18n key is never shown raw.
 4. **Runtime errors**: 4xx / 5xx, error toasts, crashes, exports that never finish.
@@ -27,9 +31,43 @@ No SRS is read. The deployed system and its code describe what the function does
 
 Verdicts:
 - **P**: the behaviour matches 1-6.
-- **F**: it breaks 1, 2, 3, 4 or 5. An F needs **two independent sources**: the observation plus a screenshot, the code or the API response.
-- **PE**: only when the Quy chuẩn itself is ambiguous on a point it covers. "The business might want something else" is never a PE: the code is the rule.
+- **F**: it breaks 1, 1b, 2, 3, 4 or 5. An F needs **two independent sources**: the observation plus a screenshot, the code or the API response.
+- **PE**: not used for business questions. When the Quy chuẩn chung is silent or ambiguous and the point needs a business decision, decide it as BA (below), record it, and judge P / F against it. Use PE only when the user asks to leave a point for the real BA. "The business might want something else" is never a PE on its own: the code is the rule unless a decision is needed.
 - **No case** for a function the code does not implement (no field, no column, no button): there is nothing to run. A half-built function (a service method nobody calls, labels with no field) gets no case either; tell the user about it in the hand-off message, not in the workbook.
+
+## Acting as BA (group conventions)
+
+The PIC has asked Claude to take the business decisions itself instead of waiting for a BA. There are two levels:
+- `rules/standard.md`: the **Quy chuẩn chung**, for every test case of the project. It summarises the BA's document; Claude does not change its rules on its own.
+- `rules/groups/<group>.md`: the **conventions of one function group**. The key comes from the function list's "Nhóm" column: `1D.I`, `1E.I`, `2E.I`, `1B.III.3`… `brief.md` names the file. Claude writes these, acting as BA.
+
+**When to decide.** A point needs a decision when the verdict depends on a business rule that neither the Quy chuẩn chung nor the group file settles, and one of these holds:
+- the code shows no deliberate rule, e.g. the logic is outside the repo;
+- two parts of the system disagree;
+- a section of the Quy chuẩn chung was written for another kind of screen, and it is unclear whether it fits this one;
+- you would otherwise write a PE or ask the user.
+
+Where the code implements a rule on purpose and nothing contradicts it, the code is still the rule and no decision is needed.
+
+**How to decide.** Apply these in order:
+1. Stay inside the Quy chuẩn chung. A convention says how a section applies to the group, never the opposite of it.
+2. Keep the system consistent: take the rule another screen of the same system already applies to the same data, e.g. the dashboard's company scope.
+3. Serve the purpose of the function for its user. A supervisor needs every real obligation once, nothing invented, nothing lost.
+4. Keep it deterministic: the same data always gives the same result, so pick a tie-break.
+5. Choose the smallest rule that settles the case. Add no requirement beyond what the screen offers.
+
+Do not decide what is not a business rule. Safety, accounts, SELECT permission, demos and test data stay with the user.
+
+**How to record.** Before judging, add a row to the group file. To create a new file, copy the header of an existing group file.
+`| Qn | quyết định (one sentence, business words) | lý do | Claude quyết định dd/mm/yyyy (<code>) |`
+
+Never renumber or reuse a Q id. To change a decision, edit its row and add the date. Then:
+- cite it in column J: `Căn cứ: Quy ước kiểm thử nhóm 1D.I mục Q2`;
+- make the precondition row say: "Điểm Quy chuẩn chung không quy định: theo Quy ước kiểm thử nhóm <key> (người kiểm thử đặt thay BA, chờ BA rà lại)". Never write that the BA confirmed them;
+- `rt build` checks both: an unknown Qn, or a missing precondition line, fails the gate;
+- list the new or changed items in the hand-off.
+
+**When a real BA answers**, change the row's status to "BA xác nhận dd/mm", or to "BA sửa dd/mm" together with the new text. Then re-judge every case that cites the item (search column J for "mục Qn") in the next version of each workbook.
 
 ## Ground rules (non-negotiable)
 
@@ -66,7 +104,9 @@ Do the steps in order and don't skip one. Each step leaves files in the workspac
 
    **If the trace says "found by: name only"**, the menu path is missing or matches no menu entry. Find the screen's route (menu definition, routes file, or ask the user) and run `rt start <code> --route /the/route`.
 
-   **If a note says the function was dropped or replaced** (e.g. "Nghiệp vụ confirm bỏ chức năng này"), say so in step 4 and ask whether to test it.
+   **If a note says the function was dropped or replaced** (e.g. "Nghiệp vụ confirm bỏ chức năng này"), decide as BA.
+   - Follow the note: no workbook. The exception is when the code shows the function live on the screen; then test what is there.
+   - Record the decision in the group file and say so in the hand-off.
 
    **If `brief.md` lists sibling reports**, this is probably the same screen seen by another kind of user or with another filter (1E_117 internal / 1E_118 public company: one `/dashboard`).
    - Find what differs before writing any case: the account type, the data scope, the filter. The workbook is about that difference.
@@ -75,6 +115,7 @@ Do the steps in order and don't skip one. Each step leaves files in the workspac
 
    Then read, in this order:
    - the standard. **It overrides the code** on what it covers;
+   - the group's conventions file named in `brief.md`, if it exists. Its items settle points for every report of the group;
    - `.report-kit/rules/environment.md` and `.report-kit/rules/lessons.md`;
    - the previous workbook dump, if any: every `##### COMMENT` is reviewer feedback to handle.
 
@@ -93,7 +134,7 @@ Do the steps in order and don't skip one. Each step leaves files in the workspac
    - which account to use: a super admin can't reproduce data-permission cases. With a sibling report, ask for the account type that makes this one different (e.g. a public-company login);
    - OK to run read-only SELECTs this session?
    - is another team demoing or doing UAT on the environment?
-   - anything from step 2 that needs a decision (a dropped function, an unknown ticket number).
+   - an unknown ticket number. Do not ask business questions: decide them as BA ("Acting as BA").
 
    Do not continue without the answers.
 
@@ -121,6 +162,7 @@ Do the steps in order and don't skip one. Each step leaves files in the workspac
 8. **Judge** every case with "What a verdict is based on" above.
    - **Not run**: say why ("Chưa thực hiện - cần tài khoản không phải admin", "- cần dữ liệu", "- không đo được: …").
    - A point the standard settles cites its section.
+   - A point that needs a business decision: take it as BA, write it in the group file first, then judge and cite `Quy ước kiểm thử nhóm <key> mục Qn`.
    - A difference between the data and your expectation that the code explains on purpose (a status, a scope, a priority) is not a bug: correct the expectation to the code's rule, unless the Quy chuẩn or 2-4 says otherwise.
 
 9. **Write the workbook: `<workspace>/build_workbook.py`, then `rt build <code>`.** See `references/output-format.md`.
@@ -136,7 +178,7 @@ Do the steps in order and don't skip one. Each step leaves files in the workspac
    - The file name comes from the profile. Never overwrite a delivered version: bump `version`.
    - `rt build` runs the quality gate: coverage (above), every case has a concrete H, no row is hidden, and the wording check (verdict first, no line over 160 characters, no symbols or internal names in B C D H, no run id in J, one bug per case). Fix every line it lists and rebuild.
 
-10. **Hand off** (`output-format.md`, "Hand-off message"): audience line, path, counts, data comparison in one line, bugs one line each, what was not run, what changed, requirements without a case, half-built functions.
+10. **Hand off** (`output-format.md`, "Hand-off message"): audience line, path, counts, data comparison in one line, bugs one line each, what was not run, what changed, requirements without a case, half-built functions, group conventions added or changed.
 
 ## Reviewer comments on a delivered workbook
 
