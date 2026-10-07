@@ -102,22 +102,9 @@ Every UI entry starts in a fresh browser context with the saved login, and a fin
 - mouse and keyboard: `hover`, `click`, `select` (`label` / `value`, `nth`), `fill`, `press`, `tab: N` (records `focus_order`);
 - waiting and navigation: `wait` (ms), `wait_for`, `goto`, `reload`;
 - page state: `set_lang: en|vi`, `zoom: 150`, `offline: true`, `route` (stub one request; also allowed at entry level as `routes:`);
-- evidence: `expect_download` (records `{downloaded, name}`; the file is kept in `shots/` as `<id>_<file name>`), `screenshot: name`, `observe`;
-- positions for bug pictures: with the final screenshot, the kit records the position of every observation that has a selector, plus the entry's `boxes: {name: selector}` (e.g. `filters`, `grid`, `toolbar`), in `<id>.json`. `E.run_shot(run, id, caption, mark=[…], show=[…])` crops and outlines from them in step 9 without a new capture, so name the areas a picture would need when you write the entry;
-- bug picture: `screenshot: {name, selector, highlight, pad}` captures only the area of `selector` (+ `pad` px, default 12) with each `highlight` element outlined in red (`"css"`, `{selector, nth}`, or `{selector, all: true}` for every match). The outline is removed right after, so later observations are unaffected. Use it for every bug that shows on the screen; the file feeds `E.shot(...)` of the bug's card (`output-format.md`, "Hình ảnh lỗi");
+- downloads and captures: `expect_download` (records `{downloaded, name}`; the file is kept in `shots/` as `<id>_<file name>`), `screenshot: name`, `observe`;
+- `screenshot: {name, selector, highlight, pad}` captures only the area of `selector` (+ `pad` px, default 12) with each `highlight` element outlined in red; use it only when a verdict depends on a part of the screen the final screenshot doesn't show;
 - `js` (last resort).
-
-```yaml
-- id: U14
-  title: Hình minh chứng BUG-01 - Hiện tại âm
-  page: /audit/report/tong-hop-ctkt
-  steps:
-    - fill: {selector: "input[formcontrolname=fromYear]", text: "2026"}
-    - click: {text: "Tìm kiếm"}
-    - wait_for: {selector: "tbody tr"}
-    - screenshot: {name: bug01, selector: ".table-wrapper",
-                   highlight: [{selector: "tbody tr:has-text('KPMG') td.col-hien-tai", all: true}]}
-```
 
 **Observations:**
 - page content: `text` (first match), `texts` (all), `count`, `attr {selector, name}`, `value`, `js: "() => ..."`;

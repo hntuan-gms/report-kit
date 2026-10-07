@@ -6,12 +6,12 @@
   rt login [--system S]        log in through the real SSO page, save the session
   rt probe <code> [--tables]   run the profile's data traps on the report's tables -> probe.md
   rt check <code> [--only ids] [--redo] [--kind data|ui]    run checks.yaml -> runs/<id>/summary.md
-  rt build <code>              run the workspace's build_workbook.py, then the quality gate (results, bug ids, coverage matrix)
+  rt build <code>              run the workspace's build_workbook.py, then the quality gate (results, hidden rows, wording)
   rt status <code>             what is done, what is next
   rt sql "<SELECT ...>"        one read-only query (SELECT only)
   rt api GET /path [--params '{...}']   one call to a read-only endpoint, JSON printed
   rt dump <file>               xlsx / docx -> text (reviewer comments included)
-  rt tally <workbook.xlsx> [--probe probe.json]   counts per section + rows failing the quality gate
+  rt tally <workbook.xlsx>     counts per section + rows failing the quality gate
   rt install-skill [dir]       copy the /report-test skill into <dir>/.claude/skills (default: current project)
 """
 import argparse
@@ -202,26 +202,23 @@ def cmd_build(a):
     out = r.stdout.strip().splitlines()[-1] if r.stdout.strip() else ""
     if out.endswith(".xlsx") and os.path.exists(out):
         first = int(prof.get("workbook.first_row", 12))
-        counts, bad, f_no_bug = workbook.tally(out, first)
-        _out("counts: %s\nrows with empty / status-only 'Kết quả hiện tại': %s\nF rows without bug id: %s" % (counts, bad, f_no_bug))
-        cov_ok = _print_coverage(workbook.coverage_gate(out, ws.p("probe.json"), first, (prof.get("workbook.header_cells") or {}).get("code", "D3")))
-        hid = workbook.hidden_rows(out, first)
-        _out("hidden rows on the test case sheet (invisible in Excel): %s" % (hid or []))
-        no_pic = workbook.evidence_gate(out)
-        _out("open bugs with no picture in 'Hình ảnh lỗi' and no 'Không có hình: <lý do>': %s" % (no_pic or []))
-        ok = not bad and not f_no_bug and cov_ok and not hid and not no_pic
+        ok = _gate(out, first, (prof.get("workbook.header_cells") or {}).get("code", "D3"))
         _out("quality gate: %s" % ("OK" if ok else "FAIL - fix the lines above, then bump version and rebuild"))
-        ws.mark("build", file=out, counts=counts, gate_ok=ok)
+        ws.mark("build", file=out, gate_ok=ok)
 
 
-def _print_coverage(c):
-    if c["missing_sheet"]:
-        _out("coverage: sheet '%s' missing - add wb.sheet_coverage(...) (references/output-format.md)" % "Ma trận bao phủ")
-        return False
-    _out("coverage rows with no case and no 'Không áp dụng' / 'Chưa phủ' reason: %s" % c["rows_without_reason"])
-    _out("FOUND traps not mapped to a coverage row: %s" % c["traps_not_mapped"])
-    _out("cases no requirement points to (info): %s" % (c["cases_not_referenced"] or "[]"))
-    return not c["rows_without_reason"] and not c["traps_not_mapped"]
+def _gate(path, first=12, code_cell="D3"):
+    """Print the checks of the test case sheet; True when nothing blocks."""
+    from . import workbook
+    counts, bad = workbook.tally(path, first)
+    _out("counts: %s\nrows with empty / status-only 'Kết quả hiện tại': %s" % (counts, bad))
+    hid = workbook.hidden_rows(path, first)
+    _out("hidden rows on the test case sheet (invisible in Excel): %s" % (hid or []))
+    rd = workbook.readability(path, first, code_cell)
+    _out("wording for a Tester / BA reader: %s" % ("OK" if not rd else "%d problems" % len(rd)))
+    for cid, col, why in rd:
+        _out("  %s %s: %s" % (cid, col, why))
+    return not bad and not hid and not rd
 
 
 def cmd_status(a):
@@ -259,12 +256,7 @@ def cmd_dump(a):
 
 
 def cmd_tally(a):
-    from . import workbook
-    counts, bad, f_no_bug = workbook.tally(a.file)
-    _out("counts: %s\nrows with empty / status-only 'Kết quả hiện tại': %s\nF rows without bug id: %s" % (counts, bad, f_no_bug))
-    _out("hidden rows on the test case sheet (invisible in Excel): %s" % (workbook.hidden_rows(a.file) or []))
-    _out("open bugs with no picture in 'Hình ảnh lỗi' and no 'Không có hình: <lý do>': %s" % (workbook.evidence_gate(a.file) or []))
-    _print_coverage(workbook.coverage_gate(a.file, a.probe))
+    _gate(a.file)
 
 
 def cmd_install_skill(a):
@@ -299,8 +291,7 @@ def main(argv=None):
     x = sp.add_parser("api"); x.add_argument("method"); x.add_argument("path"); x.add_argument("--params"); x.add_argument("--body")
     x.add_argument("--system"); x.add_argument("--max", type=int, default=3000); x.set_defaults(f=cmd_api)
     x = sp.add_parser("dump"); x.add_argument("file"); x.add_argument("--out"); x.set_defaults(f=cmd_dump)
-    x = sp.add_parser("tally"); x.add_argument("file"); x.add_argument("--probe", help="probe.json, to check that every FOUND trap is mapped")
-    x.set_defaults(f=cmd_tally)
+    x = sp.add_parser("tally"); x.add_argument("file"); x.set_defaults(f=cmd_tally)
     x = sp.add_parser("install-skill"); x.add_argument("dir", nargs="?"); x.set_defaults(f=cmd_install_skill)
     a = ap.parse_args(argv)
     return a.f(a) or 0

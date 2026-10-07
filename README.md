@@ -6,7 +6,7 @@ Gõ `/report-test <mã>` trong Claude Code, ví dụ `/report-test 1E_117`. Bộ
 2. hỏi anh/chị **một lần** (tài khoản, có cho SELECT DB không, có ai đang demo không);
 3. đăng nhập, dò bẫy dữ liệu;
 4. quan sát màn hình và so số liệu bằng SQL độc lập;
-5. xuất workbook theo mẫu của dự án (KBKT).
+5. xuất workbook theo mẫu của dự án (KBKT), **chỉ một sheet test case**: Tester / BA chỉ đọc sheet này, nên không còn sheet phụ hay hình minh chứng.
 
 **Cách làm (cách A):**
 - **Claude** đọc code của chức năng (đó là đặc tả), rồi **đánh giá** mọi kết quả theo Quy chuẩn chung, tính nhất quán của chính hệ thống và quy tắc mà code áp dụng. Kit không đọc SRS.
@@ -54,10 +54,10 @@ Có thể thay bằng biến môi trường `RK_LOGIN_USER`, `RK_LOGIN_PASSWORD`
 | `rt login` | Đăng nhập SSO thật, lưu phiên. Phiên còn hạn thì dùng lại |
 | `rt probe <mã>` | Chạy bộ bẫy dữ liệu trên các bảng của báo cáo → `probe.md` |
 | `rt check <mã> [--only D01,U03] [--redo]` | Chạy `checks.yaml`. Mỗi mục chạy riêng; `--redo` chạy lại các mục NM / ERR |
-| `rt build <mã>` | Chạy `build_workbook.py` của workspace và kiểm chất lượng workbook |
+| `rt build <mã>` | Chạy `build_workbook.py` của workspace và kiểm chất lượng sheet test case: kết quả cụ thể, không dòng ẩn, câu chữ dễ đọc cho Tester / BA |
 | `rt status <mã>` | Bước nào xong, bước nào tiếp theo (tiếp tục khi phiên bị ngắt) |
 | `rt sql "<SELECT>"`, `rt api GET /path` | Tra nhanh (chỉ SELECT; chỉ gọi endpoint đã xác nhận là chỉ đọc) |
-| `rt dump <file>`, `rt tally <file>` | Đọc xlsx / docx (kèm comment reviewer), đếm P / F / PE của workbook |
+| `rt dump <file>`, `rt tally <file>` | Đọc xlsx / docx (kèm comment reviewer); đếm P / F / PE và chạy lại cổng chất lượng trên một workbook |
 
 Mọi file làm việc nằm ở `~/report-kit-work/<hồ sơ>/<mã>/`, ngoài repo:
 
@@ -82,8 +82,8 @@ Mọi file làm việc nằm ở `~/report-kit-work/<hồ sơ>/<mã>/`, ngoài r
 | Quan sát giao diện | Viết script Python / JS mới mỗi lần, cố định ngày | Khai báo bước trong `checks.yaml`, biến động `{current_year}` / `{prev_month}` …, mỗi mục một trang riêng |
 | Đo sai im lặng | Không phát hiện | Tiền đề `ready` / `require` → NM "không đo được" |
 | Chạy lại phần hỏng | Viết thêm script | `rt check --redo` / `--only` |
-| Quy nguyên nhân ô lệch | Viết tay | `variants`: mỗi ô lệch ghi quy tắc giải thích nó; sheet chi tiết sinh tự động |
-| Hình minh chứng lỗi | Dựng tay từng hình theo file mẫu | `reportkit.evidence` + `wb.sheet_evidence`: thẻ minh chứng (bước, thực tế / mong đợi, ảnh khoanh đỏ, Excel ô sai tô đỏ, dữ liệu nguồn) sinh vào sheet "Hình ảnh lỗi", liên kết hai chiều với "Danh sách lỗi"; `rt build` chặn lỗi đang mở mà không có hình |
+| Quy nguyên nhân ô lệch | Viết tay | `variants`: mỗi ô lệch ghi quy tắc giải thích nó |
+| Câu chữ trong testcase | Không kiểm | `rt build` chặn: H không mở đầu bằng kết luận, dòng quá 160 ký tự, ký hiệu (Σ → ≥), tên bảng / cột, `file:line`, mã lượt chạy, nhiều lỗi trong một case |
 | Đăng nhập | Lỗi `networkidle`, khớp URL sớm | Đã sửa; tự đăng nhập lại khi phiên hết hạn |
 | Dự án khác | Sửa code | Viết hồ sơ `.report-kit/`; lõi không chứa gì riêng của dự án |
 

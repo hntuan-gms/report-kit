@@ -1,29 +1,21 @@
 # Output format: the test case workbook
 
-One `.xlsx` per report, built with `reportkit.workbook.Workbook` from the template named in the profile (`workbook.template`, KBKT by default).
-There is no reference workbook to copy wording from: follow the rules on this page.
-
-## Level of detail to aim for
-
-- **Data comparison:** state the scope and the result in numbers, e.g. "118 công ty, 1.837 ô có dữ liệu, 29 ô sai, 9 ô chưa rõ quy tắc". Every wrong cell is traced to the source record that causes it.
-- **Each data rule has one real example** from the environment: a correction chain with the value it changes, a draft on top of an approved record, a NULL period, a deleted or out-of-scope record, duplicates. Name it (company, period, ID, value).
-- **Each bug states:** the mechanism in one sentence (what the code does wrong), how many cells or rows it hits, and one concrete example. "The dedup takes the latest row with no status filter, so drafts override approved values (27 ô; ANV 2022: 18 → 23)."
-- **The "Quy tắc nghiệp vụ" sheet lists every rule the function applies**, including the correct ones: data scope (status, language, corrections, company scope), filters, calculations, display, and the rules one report applies and a sibling report doesn't.
+One `.xlsx` per report with **one sheet: the test cases**, built with `reportkit.workbook.Workbook` from the template named in the profile (`workbook.template`, KBKT by default). No other sheet and no bug pictures: Testers and BAs read only the test case sheet, so everything they need is in it.
 
 ## File name and version
 
 `AI-<jira-or-ticket>_<code without #>_<TenKhongDau>_v<N>.xlsx`, e.g. `AI-60_2E50_BaoCaoTongHopDanhSachCongTyKiemToan_v1.xlsx`.
 - Ask for the AI-xx ticket number if you don't know it.
-- Never overwrite a file that was sent for review. Create `v<N+1>`, because the reviewer's comments live in the old one.
+- Never overwrite a file that was sent for review. Create `v<N+1>`: the reviewer's comments live in the old one.
 
-## Sheet 1: test cases (template layout, sheet named `<code> <short name>`)
+## The sheet (template layout, named `<code> <short name>`)
 
 Header cells:
 - D2 = `[# code] name (REPORT_CODE) - <subsystem> > menu path`
 - D3 = the code. The formula in column A turns it into `1E_128_1`, `1E_128_2`, …
-- D4–D8 = counters. They count from column **E (Lần 1)**, never from H.
+- D4–D8 = counters, from column **E (Lần 1)**.
 
-Block structure (the template's colours come from `reportkit.workbook`):
+Blocks (colours come from the template):
 ```
 Chức năng 1: <name> - Tìm kiếm/Tra cứu và Xuất Excel      (chapter, yellow)
 1. Đăng nhập ... 2. Menu >> ... >> ...                     (precondition row)
@@ -39,69 +31,95 @@ An toàn thông tin                                          (category, green - 
   2. Kiểm tra SQL Injection - Select
   Kiểm tra SQL Injection - Insert
 ```
-- Do **not** include "Validate các trường" (per-field input validation). The team calls it "test dữ liệu đầu vào" and it is out of scope.
-- **Always include "An toàn thông tin"**, as the last category: XSS and SQL Injection across the filter fields, the URL and the rendered data. `test-areas.md`, "An toàn thông tin", has the full list of cases, how to measure them and how to judge them. A case that does not fit the screen (no delete, no insert, login on a shared SSO) stays in the block with the reason in H.
+- No "Validate các trường" (per-field input validation): out of scope.
+- **Always end with "An toàn thông tin"** (`test-areas.md`). A case that does not fit the screen stays, with `Không áp dụng - <lý do>` in H.
 
-Columns:
+## Columns
 
-| Col | Content | Rule |
-|---|---|---|
-| B | Mục đích kiểm thử | "Kiểm tra …" in plain words, specific ("Kiểm tra số kiểm toán viên 'Hiện tại' không bị âm") |
-| C | Các bước thực hiện | Numbered **screen actions** with the concrete data used ("1. Chọn Từ năm = 2026, Tên công ty = Công ty TNHH KPMG 2. Nhấn [Tìm kiếm] 3. Xem nhóm …"). No API paths |
-| D | Kết quả mong muốn | What must happen, in business terms: the function's rule (from `analysis.md`) or the Quy chuẩn, in plain words. Never "như hệ thống đang làm" |
-| E/F/G | Lần 1/2/3 | `P` / `F` / `PE` only, with green / red / yellow fill. Empty = not run |
-| H | Kết quả hiện tại | Starts with `Đạt.` (P) / `Sai.` (F) / `Cần BA xác nhận.` (PE, rare) / `Chưa thực hiện - <lý do>` (not run). Then **what was seen on the screen or in the file**, one concrete example (company name, year, value), and for F / PE the cause in business words. No `file:line`, table / column names, record IDs or run ids here |
-| I | Mã lỗi | Bug id from sheet "Danh sách lỗi" |
-| J | Ghi chú | Line 1: the **basis** (see "Căn cứ" below). Line 2 `Kỹ thuật: …`: the evidence for DEV / BA: `file:line`, table.column, record IDs, SQL counts, run ids (U05, D04) |
+| Col | Content |
+|---|---|
+| B | Mục đích: `Kiểm tra <điều gì> <ở đâu>`, one short sentence |
+| C | Các bước: one screen action per line, with the data used. No API paths |
+| D | Kết quả mong muốn: one expected point per line, in business words |
+| E/F/G | Lần 1/2/3: `P` / `F` / `PE`, empty = not run |
+| H | Kết quả hiện tại: the verdict, then what was seen (format below) |
+| I | Mã lỗi: leave empty; the Tester writes the tracker's bug id after logging it |
+| J | Line 1 `Căn cứ: …`. For an F only, optional line 2 `Kỹ thuật: …` for DEV |
 
-### Căn cứ (line 1 of column J)
+Pass lists to `wb.tc()`: it numbers the steps, bullets the expected lines and the lines of H after the verdict.
 
-One line, the first that applies:
+## Writing for a Tester / BA (the main rule)
+
+Testers complained that cases read like machine output: one long paragraph, symbols, internal names, several bugs in one row. Write so a reader who has never seen the code understands each row in one read.
+
+1. **One case = one check = at most one bug.** If a check finds two different problems, write two cases.
+2. **One idea per line.** No line over 160 characters. H has at most 5 lines.
+3. **Words, not symbols.** No `Σ`, `→`, `≥`, `≤`, `×`, `|`. Write "từ 90 điểm trở lên", "cộng", "đúng ra là".
+4. **Names as the screen shows them**: column titles, button labels, company names. Never table / column / variable names, `file:line`, record IDs or check ids (`D01`, `U17`) in B, C, D, H.
+5. **No shorthand or tool words**: no `vd` (write "Ví dụ"), `v.v`, `API`, `view`, `dedup`, `NULL`, `MATCH`, `NM`, "ô so sánh". Count in what the reader sees: "công ty", "lượt đánh giá", "dòng", not "ô".
+6. **Numbers**: Vietnamese format in prose (1.743 công ty); values copied from the screen stay as shown.
+
+H, line by line:
+```
+Đạt. | Sai. | Cần BA xác nhận. | Chưa thực hiện - <lý do> | Không áp dụng - <lý do>
+- Ví dụ: <công ty, kỳ>: màn hình hiện <X>[, đúng ra là <Y>].
+- Phạm vi: <bao nhiêu công ty / lượt / dòng bị, ở kỳ nào>.          (F, when it is more than the example)
+- Nguyên nhân: <in business words>.                                (F, when known)
+```
+`rt build` checks this: H starts with the verdict of column E, no line too long, no symbol / internal name in B C D H, no run id in J, one bug per case.
+
+### Căn cứ (line 1 of J)
+
+The first that applies:
 
 | Basis | Wording |
 |---|---|
 | The Quy chuẩn covers it | `Căn cứ: Quy chuẩn chung TC-TK mục II.5.1` |
-| The system contradicts itself | `Căn cứ: lưới và file Excel phải thống nhất` / `Căn cứ: nhãn cột "Ngày QĐ lần đầu" và dữ liệu trong cột phải thống nhất` / `Căn cứ: trường bắt buộc phải có dấu (*)` |
-| Plain correctness | `Căn cứ: ràng buộc dữ liệu - số kiểm toán viên không thể âm` / `Căn cứ: "Đến ngày" gồm cả ngày cuối` / `Căn cứ: danh sách chọn phải có đủ giá trị` |
+| The system contradicts itself | `Căn cứ: lưới và file Excel phải thống nhất` / `Căn cứ: trường bắt buộc phải có dấu (*)` |
+| Plain correctness | `Căn cứ: ràng buộc dữ liệu - số kiểm toán viên không thể âm` / `Căn cứ: "Đến ngày" gồm cả ngày cuối` |
 | Runtime error | `Căn cứ: chức năng phải chạy không lỗi` |
 | Security | `Căn cứ: KBKT_Template khối An toàn thông tin` |
-| The function's own rule (scope, priority, labels, messages) | `Căn cứ: thiết kế chức năng` |
+| The function's own rule | `Căn cứ: thiết kế chức năng` |
 
 Never `Căn cứ: SRS …`, and never a sentence saying the SRS was not used, is outdated, or that the code is the reference.
 
-### Writing style (test case sheet)
+`Kỹ thuật:` (F only, one line): where DEV should look, e.g. `Kỹ thuật: dòng tổng lấy điểm lưu sẵn, các nhóm tính lại (evaluation-ranking-detail.component.ts:226)`. No run ids, no SQL.
 
-The test case sheet is read by Testers and BAs, not only by DEV. Write it so a reader who has never opened the code understands every row.
-- Short Vietnamese sentences, one idea each. Name things the way the screen names them (the column title, the button label, the company name), not by table / column / variable names.
-- No internal shorthand in B, C, D, H: no `NaN`, `MATCH`, `NM`, `view`, `dedup`, `RN = 1`, `CTE`, `API`, `request`. When a technical term is unavoidable, explain it once in plain words.
-- Technical detail is never lost: it moves from H to the `Kỹ thuật:` line of J, or to the sheets "Quy tắc nghiệp vụ" / "Danh sách lỗi" / "Chi tiết sai lệch dữ liệu", which keep the full technical wording for DEV.
-- Numbers use the Vietnamese format in prose (1.837 ô, 6.136 lượt); values copied from the screen stay as shown.
+### Example: before and after (1D_116_18)
 
-Example (F):
+Before (one block, symbols, three companies in one sentence, run ids):
+> D: TỔNG ĐIỂM = 100 + Σ Tổng điểm nhóm (các số trên cùng một bảng)
+> H: Sai. AMD: Tổng điểm nhóm −3,5 / 0 / 0 / 0 nhưng TỔNG ĐIỂM 4 NHÓM = 0 (đúng ra 96,5). CPA: nhóm 1 −0,35 nhưng TỔNG ĐIỂM = 100. BMK kỳ 08/2026 khớp (−10,5 −15 −2,5 −2 → 70).
 
-| Cột | Text |
-|---|---|
-| B | Kiểm tra số kiểm toán viên "Hiện tại / Cuối kỳ" không bị âm |
-| C | 1. Chọn Từ năm = Đến năm = 2026, Tên công ty = Công ty TNHH KPMG<br>2. Nhấn [Tìm kiếm]<br>3. Xem nhóm "Thông tin tăng/giảm KTV", cột BTC và UBCK |
-| D | Hiện tại = Đầu kỳ + Tăng − Giảm. Đây là số người nên không bao giờ âm |
-| H | Sai. KPMG năm 2026 hiện Đầu kỳ 0, Tăng 0, Giảm 40, Hiện tại −40 (cả BTC và UBCK). Cũng bị âm: AISC (−29 / −23). Nguyên nhân: 40 kiểm toán viên nghỉ được trừ ở cột Giảm nhưng chưa từng được cộng vào Đầu kỳ, vì quyết định chấp thuận của họ không ghi ngày ban hành. |
-| J | Căn cứ: ràng buộc dữ liệu - số kiểm toán viên không thể âm.<br>Kỹ thuật: view so sánh APPROVAL_ISSUE_DATE = MIN(…), bản ghi ngày ban hành NULL bị loại (R104_v_rpt_tong_hop_ctkt.sql:272-294); API trả btcAudHienTai = −40 (D04, U14). |
+After:
+```python
+wb.tc("Kiểm tra dòng TỔNG ĐIỂM 4 NHÓM trên màn hình chi tiết",
+      ["Mở chi tiết Công ty Cổ phần Đầu tư và Khoáng sản FLC AMD, kỳ 09/2026",
+       "Cộng cột Tổng điểm nhóm của 4 nhóm", "So với dòng TỔNG ĐIỂM 4 NHÓM"],
+      ["TỔNG ĐIỂM 4 NHÓM bằng 100 cộng điểm (âm) của 4 nhóm", "Hai số trên cùng màn hình phải khớp nhau"],
+      basis="Căn cứ: các số liệu của cùng một lượt đánh giá phải thống nhất\n"
+            "Kỹ thuật: dòng tổng lấy điểm lưu sẵn, các nhóm tính lại (evaluation-ranking-detail.component.ts:226)",
+      status="F", actual=["Sai.",
+          "Ví dụ: FLC AMD kỳ 09/2026: 4 nhóm cộng lại là −3,5 nhưng dòng TỔNG ĐIỂM 4 NHÓM hiện 0. Đúng ra là 96,5.",
+          "Cũng sai: Cà phê Phước An kỳ 05/2026: nhóm 1 bị trừ 0,35 nhưng TỔNG ĐIỂM vẫn là 100.",
+          "Nguyên nhân: dòng tổng lấy điểm đã lưu từ trước, không tính lại từ các nhóm."])
+```
 
-Example (P on the function's own rule):
+A whole-report comparison case gives the scope, then one line per kind of error with its count, and leaves the detail to the case of that error:
+```
+Sai. Đã kiểm tra 27.754 lượt đánh giá của 16 kỳ.
+- Phân loại để trống dù đã có Điểm: 15.695 lượt (chi tiết ở case "Kiểm tra cột Phân loại").
+- Điểm không khớp kết quả từng tiêu chí: 7.280 lượt. Ví dụ: FLC AMD kỳ 09/2026 hiện 0, đúng ra là 45.
+- Tên công ty, MDN, Sàn, MCK, Chuyên viên: khớp toàn bộ.
+```
 
-| Cột | Text |
-|---|---|
-| B | Kiểm tra thứ tự ưu tiên loại báo cáo khi lấy Vốn đầu tư chủ sở hữu |
-| D | Lấy từ BCTC năm gần nhất đã duyệt, theo thứ tự ưu tiên Hợp nhất, Tổng hợp, Mẹ, Riêng |
-| H | Đạt. Công ty ILC năm 2025 có cả BCTC Mẹ và BCTC Riêng, không có Hợp nhất: màn hình hiện số của BCTC Mẹ (55,340,627,293). |
-| J | Căn cứ: thiết kế chức năng.<br>Kỹ thuật: R112 ... (file:line); D07 |
+## Status meaning
 
-Status meaning:
-- `P`: matches the expected result: the Quy chuẩn where it applies, otherwise the function's own rule.
+- `P`: matches the expected result: the Quy chuẩn where it applies, otherwise the function's own rule. A P with exceptions is not a P: the exceptions are an F case of their own.
 - `F`: breaks the Quy chuẩn, contradicts the system itself, is plainly wrong for any business rule, fails at runtime, or fails a security case.
-- `PE`: rare. Only when the Quy chuẩn is ambiguous on a point it covers. Link the case to a question in "BA làm rõ".
+- `PE`: rare. Only when the Quy chuẩn is ambiguous on a point it covers; put the question for BA in H.
 
-Run information: fill in the template's comment on the Lần N header (E11) and on H10:
+Run information: `wb.finish(run_date, run_note)` writes it as a comment on the Lần N header and on H10:
 ```
 Thời gian: dd/mm/yy - dd/mm/yy
 Người thực hiện: <person> (chạy tự động bằng Claude, tài khoản <login>)
@@ -109,121 +127,28 @@ Bản build: Bản build dd/mm/yy (<env>, frontend cập nhật <Last-Modified o
 ```
 Get the build date with `curl -sI <site>/ | grep -i last-modified`.
 
-## Companion sheets (same order)
-
-1. **Quy tắc nghiệp vụ**: the rules of the function as built, from `analysis.md`. Built with `wb.sheet_rules(rows, title, note)`; columns are `reportkit.workbook.RULE_HEADERS`. One row per rule:
-   - hạng mục → the rule in plain words → `file:line` → what the environment showed (with one example) → the Quy chuẩn section it falls under (or `-`) → đánh giá → bug id or case ids → ghi chú. The kit adds an empty "DEV xác nhận" column.
-   - Đánh giá: `Đúng` (green), `Lỗi` (red, with the bug id), `Lưu ý` (yellow: correct but worth knowing, e.g. a sibling report applies another scope).
-   - The note in row 2 names the repo commit the `file:line` references point to, and the dev run dates.
-2. **Danh sách lỗi**: `BUG-nn`, severity, status, description, basis, cause in code, evidence (date + concrete values), and **Hình ảnh minh chứng** (column H, filled by `wb.sheet_evidence`: a link "Xem hình BUG-01 (1/2) (+1 hình tiếp theo)" to the picture, or `Không có hình: <lý do>`).
-   - Statuses: Mới / Mở / Mở (chưa kiểm lại được) / Đã đóng / Rút lại theo Quy chuẩn …
-   - Keep withdrawn and closed bugs listed, with the reason, so reviewers can trace them.
-3. **Hình ảnh lỗi**: one picture per bug, or per way the bug shows (two causes, two screens: `BUG-01 (1/2)`, `(2/2)`). Built with `wb.sheet_evidence(cards, title, note, no_image)`; see "Hình ảnh lỗi" below.
-4. **Chi tiết sai lệch dữ liệu**: every wrong cell from the data comparison. Give the key, column, field, value shown, expected value, cause (which submission / rule) and bug id. The note states the expected-value rule and what was excluded.
-5. **BA làm rõ**: only when a PE needs one (the Quy chuẩn is ambiguous). Topic, question, severity, status (`Đã chốt` / `Còn mở` / `Chốt một phần`), answer. No sheet when there is no question.
-6. **Nguồn dữ liệu**: one row per output row or column. Give where it comes from (table.column / form field code / FIELD_ID / data type / lookup group) and the screen / file column it feeds.
-7. **Ma trận bao phủ**: the answer to "is the set complete?". Built with `wb.sheet_coverage(rows, title)`, one row per requirement:
-   - Sources, in this order: every element of the screen and the file (field, button, column; source `Màn hình` / `File Excel`); every rule of "Quy tắc nghiệp vụ" (source `Quy tắc nghiệp vụ`); every standard section that applies (and one row for the sections that don't, with why); every FOUND trap of `probe.md`; every applicable item of `references/test-areas.md`; the sibling difference (e.g. "Tài khoản CTĐC") when the brief lists siblings.
-   - Each row is `(source, item, requirement, case_keys, note)`. `case_keys` are the beginnings of the cases' "Mục đích"; the kit fills in the case ids (as column A shows them) and the P / F / PE tally, and raises an error when a key matches no case.
-   - A row with no case must have a note starting `Không áp dụng: <why>` or `Chưa phủ: <why>`.
-   - For a trap, put its id in "Mục" as `probe.md` prints it; when the same trap is FOUND on several tables, add the table: `soft_deleted (FORMS)`.
-   - `rt build` fails when the sheet is missing, a row has no case and no reason, or a FOUND trap is in no row. It also lists cases that no requirement points to (information only).
-
-## Hình ảnh lỗi (bug pictures)
-
-A reviewer must see each bug without re-running anything. Every bug whose status is not "Rút …" / "Đã đóng" gets at least one card (`reportkit.evidence.card`), rendered to `<workspace>/evidence/BUG-01_1.png` (+ `.html`) and embedded in the sheet.
-
-What a card shows, top to bottom:
-
-| Part | Content |
-|---|---|
-| Header | `BUG-01 (1/2)`, chip `Cao · Mở - còn lỗi 05/10`, the bug's short title (same wording as "Danh sách lỗi") |
-| Meta | `Tái hiện: dd/mm/yyyy HH:MM` · account · environment · build · menu path |
-| Các bước tái hiện | numbered screen actions with the concrete values (company, year, period), like column C of the test case sheet |
-| Kết quả thực tế (red) | what the screen / file shows, with the wrong values in **bold** |
-| Kết quả mong đợi (green) | the correct values and which record they come from |
-| ①②③ panels | the evidence, each with a caption that says what to look at |
-| Note (yellow) | same cause elsewhere, how many cells / rows, pointer to "Chi tiết sai lệch dữ liệu" |
-| Footer | `Căn cứ:` (the bug's basis, worded as in "Căn cứ") · `Nguyên nhân (code):` (`file:line`) |
-
-Panels, by kind of bug:
-
-| Bug | Panels |
-|---|---|
-| Screen (label, alignment, English mode, dropdown, toast, menu, 404 page) | `E.run_shot(run, "U07", caption, mark=[obs name], show=[area])` on the step 7 entry that observed it: cropped and outlined from the recorded positions. Only if no entry shows it: a new entry with `screenshot: {name, selector, highlight}` (`checks-guide.md`) and `E.shot` |
-| Data (wrong value, row missing / extra) | `E.run_shot` of the filters at export time; `E.excel` of the file downloaded in step 7 with `bad=[cells]` and `extra={row: correct value}` (header row: "Giá trị đúng (Tester ghi thêm, không có trong file)"); `E.table` of the source rows already fetched with `rt sql`, the row the standard picks `ok`, the row the report uses `bad` |
-| File format (number / date format, borders, empty file with STT 1, title) | `E.excel` of the area. It is drawn from the file itself (format, borders, merges), so never hide the defective rows |
-| API (HTTP 500, SQL text in the response, missing permission check) | `E.text` with the request and the start of the response; plus `E.shot` when the user sees something on the screen |
-| Permission | one card per account: the account that must not see the data, what it sees |
-
-Rules:
-- **The date is the date of the picture.** `captured` defaults to the time of the first screenshot. Reproduce on the build being reported, the same day, then write the status "Mở - còn lỗi dd/mm". A screenshot from an earlier run is evidence of that run's build only: say so ("Chụp 29/09/2026, chưa kiểm lại trên bản build 05/10") and set the status "Mở (chưa kiểm lại được)".
-- **One picture proves one thing.** Crop to the area (filters + the wrong cells), and hide the Excel rows / columns that don't matter with `rows=` / `cols=`, saying so in the caption ("Đã ẩn các dòng STT không liên quan"). The wrong value must be readable at 1000 px wide.
-- Wording is for a Tester / BA, like the test case sheet (`Writing style`). Technical names go to the footer only.
-- **Cost.** Opening pictures is the expensive part, so:
-  - never open a screenshot to find coordinates: `E.run_shot` crops and outlines from the positions `rt check` recorded;
-  - don't re-capture what step 7 already shows. New captures are only for what no entry observed, all in one `rt check --only …`;
-  - don't rewrite the bug: empty `title` / `severity` / `status` / `basis` / `cause` come from "Danh sách lỗi";
-  - `rt build` lints every card and prints one line each. Open the first card of the run (layout) and the cards with warnings, nothing else.
-- The kit refuses an `E.text` that contains credentials (Authorization, Bearer, password, cookie, token).
-- A bug no picture can show (a time-out, a race) goes to `no_image={"BUG-07": "<lý do>"}`; it is written as `Không có hình: <lý do>`. `rt build` fails on any other open bug without a picture.
-- The sheet note (row 2) gives: capture date and time range, build, accounts (and which bug used another account), browser size (1440x900), what the Excel pictures are ("dựng lại từ chính file đã tải về; ô sai tô đỏ, cột nền xanh do Tester ghi giá trị đúng"), "Dữ liệu nguồn: SELECT chỉ đọc", "Không tạo / sửa dữ liệu trên môi trường".
-- Never patch a workbook that has pictures with `openpyxl.load_workbook` + `save`: without Pillow, openpyxl drops every image when it loads a file. Change `build_workbook.py` and rebuild a new version.
-
-## Hand-off message to the user
-
-- Start with one line naming the audience ("Written for: …").
-- Give the path.
-- Give counts per section (P/F/PE/not run). `rt build <code>` (or `rt tally <file>`) prints them and flags rows whose H is empty or only a status, and F rows without a bug id.
-- Give the data comparison coverage: cases exported, filled cells compared, number wrong.
-- Give the requirement coverage from "Ma trận bao phủ": rows with cases, rows not applicable, rows not covered and why.
-- List the main bugs, each with one concrete example, and the number of pictures in "Hình ảnh lỗi" (bugs with `Không có hình`, and why).
-- Say what could not be run and why.
-- Say what changed compared with the previous version.
-- List the half-built functions found in the code (no case was written for them).
-
 ## The builder script (`<workspace>/build_workbook.py`)
 
 ```python
-import os
-from reportkit import profile as P, workbook as W, evidence as E
+from reportkit import profile as P, workbook as W
 prof = P.load(); ws = prof.workspace("1E_117")
 wb = W.Workbook(prof, ws, name="Trang tổng hợp CBTT nội bộ", screen="[# 1E_117] ... - IDS > Trang chủ",
                 ticket="AI-23", ascii_name="TrangTongHopCongBoThongTinNoiBo", version=2)
-wb.chapter("Chức năng 1: ..."); wb.pre("1. Đăng nhập ...
-2. Menu >> ...")
+wb.chapter("Chức năng 1: ..."); wb.pre("1. Đăng nhập ...\n2. Menu >> ...")
 wb.cat("Giao diện"); wb.sub("Giao diện chung")
-wb.tc(purpose, steps, expected, basis="Căn cứ: ...", status="P", actual="concrete values seen", bug=None)
+wb.tc(purpose, [steps], [expected], basis="Căn cứ: ...", status="P", actual=["Đạt.", "Ví dụ: ..."])
 ...
-wb.finish(run_date="dd/mm/yyyy", run_note="Thời gian: ...
-Người thực hiện: ...
-Bản build: ...")
-wb.sheet_rules(rule_rows, title, note); wb.sheet_bugs(bug_rows, title)    # rule_rows: 8 values; bug_rows: 7 values, column H comes next
-run = ws.latest_run(); shots = os.path.join(run, "shots")
-meta = dict(account="gms", env="ids-dev-gms.net", build="frontend cập nhật 05/10/2026 11:30",
-            screen="Trang chủ > Trang tổng hợp CBTT nội bộ")
-cards = [
-    E.card("BUG-01",              # title, severity, status, basis, cause: from 'Danh sách lỗi'
-           steps=["Đăng nhập gms, mở Trang tổng hợp CBTT nội bộ", "Năm = **2025**", "Rê chuột vào cột **Hạng A**"],
-           actual="Tooltip hiện **12** công ty", expected="**11** công ty: CTCP ABC (id 4101) đã xoá (DELETE_FLG = 1)",
-           panels=[E.run_shot(run, "U05", "Tooltip của cột Hạng A (khoanh đỏ)", mark=["tip"], show=["charts"]),
-                   E.table("Dữ liệu nguồn - SELECT chỉ đọc lúc 05/10/2026 14:48", ["COMPANY_PROFILE_ID", "Tên", "DELETE_FLG", "Vai trò"],
-                           [[4101, "CTCP ABC", 1, "Đã xoá - báo cáo vẫn đếm"]], roles=["bad"])], **meta),
-    E.card("BUG-04", steps=["Bấm **Xuất Excel**"], actual="Ô Vốn điều lệ **1234567890**", expected="**1,234,567,890**",
-           panels=[E.excel(os.path.join(shots, "U10_R104_TongHopCongTyKT.xlsx"), "File đã xuất, dòng 1-12",
-                           cells="A1:H12", bad=["F11"], extra={10: "Giá trị đúng", 11: "1,234,567,890"})],
-           captured="05/10/2026 14:52", **meta),        # no screenshot panel: give the time of the download
-]
-wb.sheet_evidence(cards, "HÌNH ẢNH MINH CHỨNG LỖI - [# 1E_117] ...",
-                  "Chụp 05/10/2026 14:40-14:55, bản build ... Tài khoản gms. Ảnh màn hình: Chromium 1440x900. ...",
-                  no_image={"BUG-09": "lỗi chỉ xảy ra khi máy chủ phản hồi chậm hơn 50 s, không thể hiện trên hình"})
-wb.sheet_details(W.details_from_run(ws.latest_run()) + extra_rows, title, note)
-wb.sheet_sources(rows, title, headers, widths)            # wb.sheet_ba(ba_rows, title) only when a PE needs a question
-wb.sheet_coverage([
-    ("Quy tắc nghiệp vụ", "Số tin theo tháng", "Định kỳ / Bất thường / Tin khác theo tháng, chỉ tin đã duyệt", ["Kiểm tra toàn bộ số lượng tin"], ""),
-    ("Bẫy dữ liệu (rt probe)", "soft_deleted (FORMS)", "Biểu mẫu đã xoá", ["Kiểm tra tin thuộc biểu mẫu đã xoá"], ""),
-    ("Quy chuẩn chung", "II.3, II.4", "Ngày xuất dữ liệu, Từ-Đến", [], "Không áp dụng: màn hình không có trường ngày"),
-], "Ma trận bao phủ: [# 1E_117] ...")
+wb.finish(run_date="dd/mm/yyyy", run_note="Thời gian: ...\nNgười thực hiện: ...\nBản build: ...")
 print(wb.save())          # the last printed line must be the file path (rt build reads it)
 ```
-Always write cells through `tc()` / `table()`: text starting with "=" is kept as text there.
+Always write cells through `tc()`: text starting with "=" is kept as text there.
+An older `build_workbook.py` that calls `wb.sheet_*` or `reportkit.evidence` no longer runs: delete those calls.
+
+## Hand-off message to the user
+
+- One line naming the audience ("Written for: …").
+- The path, and the counts per section (P / F / PE / not run) that `rt build` prints.
+- The data comparison in one line: how many companies / rows / periods, how many wrong.
+- The bugs, one line each with one concrete example.
+- What could not be run and why; what changed since the previous version.
+- Rules from `analysis.md` or FOUND traps with no case, and the half-built functions found in the code (no case written for them).

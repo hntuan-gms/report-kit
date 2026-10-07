@@ -30,53 +30,13 @@ and judges them against the report's rules / standard (the kit only records what
       toasts: toasts
       overflow: {js: "()=>document.documentElement.scrollWidth>window.innerWidth+2"}
     require: {tip: {regex: "^Hạng A"}}  # preconditions on observations, else NM
-    boxes: {filters: ".filter-panel", grid: "table"}   # optional; areas whose position is recorded with the final
-                                        # screenshot (every observation with a selector is recorded too) -> E.run_shot
 
 Observation kinds: text, texts, count, attr {selector, name}, value, js, requests, toasts, url.
 """
-import json
 import os
 import re
 
 from .. import http
-
-_BOXES_JS = ("(els,n)=>els.slice(0,n).map(e=>{const r=e.getBoundingClientRect();"
-             "return [Math.round(r.x+scrollX),Math.round(r.y+scrollY),Math.round(r.width),Math.round(r.height)]})"
-             ".filter(b=>b[2]>0&&b[3]>0)")
-
-
-def _selectors(check):
-    """{name: selector} of what the entry looked at: every observation with a selector + the entry's `boxes:`."""
-    out = {}
-
-    def add(specs):
-        for name, spec in (specs or {}).items():
-            if isinstance(spec, dict):
-                kind, arg = next(iter(spec.items()))
-                sel = arg.get("selector") if isinstance(arg, dict) else arg if kind in ("text", "texts", "count", "value") else None
-                if isinstance(sel, str):
-                    out[name] = sel
-    add(check.get("observe"))
-    for s in check.get("steps", []) or []:
-        if isinstance(s, dict) and "observe" in s:
-            add(s["observe"])
-    out.update(check.get("boxes") or {})
-    return out
-
-
-def _boxes(pg, sels, limit=60):
-    """Page coordinates (= pixels of a full-page screenshot) of up to `limit` matches of each selector."""
-    out = {}
-    for name, sel in sels.items():
-        try:
-            b = pg.eval_on_selector_all(sel, _BOXES_JS, limit)
-        except Exception:
-            continue
-        if b:
-            out[name] = b
-    return out
-
 
 def _obs(pg, name, spec, st):
     if spec == "requests":
@@ -159,8 +119,6 @@ def _screenshot(pg, spec, st, shots):
         else:
             _loc(pg, h).evaluate(_HL_ON)
     p = os.path.join(shots, "%s_%s.png" % (st["id"], spec["name"]))
-    with open(p + ".json", "w", encoding="utf-8") as f:          # read by reportkit.evidence: the picture is marked
-        json.dump({"highlighted": len(spec.get("highlight") or [])}, f)
     try:
         if spec.get("selector"):
             loc = _loc(pg, spec["selector"]); loc.scroll_into_view_if_needed()
@@ -279,7 +237,6 @@ def run(profile, system, check, browser, run_dir):
         for name, spec in (check.get("observe") or {}).items():
             st["obs"][name] = _obs(pg, name, spec, st)
         final = os.path.join(shots, "%s_final.png" % check["id"])
-        res["boxes"] = {"shot": final, "boxes": _boxes(pg, _selectors(check))}   # E.run_shot crops / outlines from these
         pg.screenshot(path=final, full_page=True)
         st["obs"].setdefault("screenshots", []).append(final)
         pre = check_all(st["obs"], check.get("require"))

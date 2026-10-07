@@ -83,8 +83,8 @@ For each rule in the report's view (the WHERE conditions, joins, dedup/ROW_NUMBE
   - dates as DD/MM/YYYY;
   - empty values stay empty (no "null" / "0").
 - **Calculated columns** (totals, ratios, counts, rankings): recompute them from the source rows in SQL and compare. Also check the totals row.
-- **The whole-report comparison:** one case that reports coverage, e.g. "118/118 companies, 1,837 cells, 1,808 match". Run it as data entries with a `matrix` over the whole scope (`rt check`).
-- **Cross-check with sibling reports** that show the same fields (e.g. R017 / R035 for R018). A different scope goes into "Quy tắc nghiệp vụ" as `Lưu ý`; two screens showing different values for the same data and the same filter is an F.
+- **The whole-report comparison:** one case that gives the scope and one line per kind of error, e.g. "Đã kiểm tra 118 công ty; 29 giá trị sai: …" (`output-format.md`). Run it as data entries with a `matrix` over the whole scope (`rt check`).
+- **Cross-check with sibling reports** that show the same fields (e.g. R017 / R035 for R018). A different scope on purpose is not a bug (mention it in the hand-off); two screens showing different values for the same data and the same filter is an F.
 
 ## Chức năng: data permission
 
@@ -141,4 +141,3 @@ must be blocked or store exactly the typed value.
   to a screen with real data instead of a "not found" page. An F needs two sources (observation + screenshot/response).
 - **Không áp dụng / Chưa thực hiện / Không đo được:** state the reason (no such function, shared SSO, blocked by
   required fields).
-- Coverage matrix: one row per case family above.

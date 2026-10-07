@@ -1,6 +1,6 @@
-"""Test case workbook from the project's template (KBKT layout by default) + companion sheets.
+"""Test case workbook from the project's template (KBKT layout by default): one sheet, the test cases.
 
-Same API as the original build_workbook.py - Claude writes a short builder script in the workspace:
+Claude writes a short builder script in the workspace:
 
     from reportkit import profile as P, workbook as W
     prof = P.load(); ws = prof.workspace("1E_117")
@@ -8,14 +8,13 @@ Same API as the original build_workbook.py - Claude writes a short builder scrip
                     ticket="AI-23", ascii_name="TrangTongHopCongBoThongTinNoiBo", version=1)
     wb.chapter("Chức năng 1: ..."); wb.pre("1. Đăng nhập ...")
     wb.cat("Giao diện"); wb.sub("Giao diện chung")
-    wb.tc("Kiểm tra ...", "1. ...", "Kết quả mong muốn", basis="Căn cứ: ...", status="P",
-          actual="Điều thực tế đã xảy ra, có giá trị cụ thể", bug="BUG-01")
+    wb.tc("Kiểm tra ...", ["Chọn Năm = 2026", "Bấm [Tìm kiếm]"], ["Ý mong muốn 1", "Ý mong muốn 2"],
+          basis="Căn cứ: ...", status="F", actual=["Sai.", "Ví dụ: ...", "Nguyên nhân: ..."])
     wb.finish(run_date="28/09/2026", run_note="Thời gian: ...\\nNgười thực hiện: ...\\nBản build: ...")
-    wb.sheet_rules(rows, title, note); wb.sheet_bugs(rows, title)   # 'Quy tắc nghiệp vụ', 'Danh sách lỗi'
-    wb.sheet_evidence(cards, title, note, no_image={...})          # 'Hình ảnh lỗi', cards from reportkit.evidence
-    wb.sheet_details(rows, title, note); wb.sheet_ba(rows, title); wb.sheet_sources(rows, title, headers, widths)
-    wb.sheet_coverage([(source, item, requirement, ["Kiểm tra ..."], note), ...], title)   # 'Ma trận bao phủ'
     wb.save()
+
+A list is written one item per line: steps are numbered "1. ", expected lines get "- ", and in 'actual' the first
+item (the verdict) stays as is and the others get "- ".
 
 Profile block (defaults shown are the KBKT template):
   workbook:
@@ -29,39 +28,29 @@ Profile block (defaults shown are the KBKT template):
     font: "Times New Roman"
 """
 import copy
-import math
 import os
+import re
 
 import openpyxl
 from openpyxl.comments import Comment
-from openpyxl.drawing.image import Image as _XlImage
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.worksheet.datavalidation import DataValidation
-from openpyxl.worksheet.hyperlink import Hyperlink
 
 GREEN = PatternFill("solid", fgColor="FFC6EFCE"); RED = PatternFill("solid", fgColor="FFFFC7CE")
-YELLOW = PatternFill("solid", fgColor="FFFFEB9C"); GREY = PatternFill("solid", fgColor="FFE7E6E6")
-BLUE = PatternFill("solid", fgColor="FFDDEBF7"); HEADER = PatternFill("solid", fgColor="FF00CCFF")
+YELLOW = PatternFill("solid", fgColor="FFFFEB9C")
 STATUS_FILL = {"P": GREEN, "F": RED, "PE": YELLOW}
-_thin = Side(style="thin"); BORDER = Border(left=_thin, right=_thin, top=_thin, bottom=_thin)
+VERDICT = {"P": ("Đạt.",), "F": ("Sai.",), "PE": ("Cần BA xác nhận.",),
+           None: ("Chưa thực hiện", "Không áp dụng")}          # how column H must start, by column E
 
-RULE_SHEET = "Quy tắc nghiệp vụ"
-RULE_HEADERS = ["STT", "Hạng mục", "Quy tắc hệ thống áp dụng", "Vị trí trong code (file:line)", "Kết quả chạy trên môi trường",
-                "Quy chuẩn chung liên quan", "Đánh giá", "Mã lỗi / case", "Ghi chú", "DEV xác nhận"]
-RULE_VERDICTS = {"Đúng": GREEN, "Lỗi": RED, "Lưu ý": YELLOW}
-BUG_HEADERS = ["Mã lỗi", "Mức độ", "Trạng thái", "Mô tả", "Căn cứ", "Nguyên nhân (code)", "Bằng chứng / tái hiện",
-               "Hình ảnh minh chứng"]           # last column filled by sheet_evidence()
-BUG_NOTE = ('Hình minh chứng của từng lỗi ở sheet "Hình ảnh lỗi" (bấm vào ô cột H). Mỗi hình gồm: các bước tái hiện, '
-            "kết quả thực tế / mong đợi, ảnh màn hình (vùng sai khoanh đỏ), file Excel đã xuất (ô sai tô đỏ) và dữ liệu nguồn khi cần.")
-EVIDENCE_SHEET = "Hình ảnh lỗi"
-NO_IMAGE = "Không có hình:"                    # 'Hình ảnh minh chứng' of a bug that cannot be pictured: + the reason
-DETAIL_HEADERS = ["Khoá (công ty / kỳ / dòng)", "Cột", "Chỉ tiêu / trường", "Giá trị trên báo cáo", "Giá trị mong đợi", "Nguồn gây sai", "Mã lỗi"]
-BA_HEADERS = ["STT", "Chủ đề", "Câu hỏi", "Mức độ", "Trạng thái", "Trả lời / căn cứ"]
-COV_SHEET = "Ma trận bao phủ"
-COV_HEADERS = ["STT", "Nguồn", "Mục", "Yêu cầu / quy tắc", "Case", "Kết quả các case (Lần 1)", "Ghi chú"]
-COV_REASONS = ("Không áp dụng", "Chưa phủ")          # a row with no case must start its note with one of these
-COV_NOTE = ("Mỗi quy tắc nghiệp vụ của chức năng, mục Quy chuẩn chung, bẫy dữ liệu (rt probe) và mục checklist trỏ tới case "
-            "kiểm tra nó. Case '-' là mục không áp dụng hoặc chưa phủ (lý do ở Ghi chú). Mã case theo cột A của sheet test case.")
+# Readability gate (`rt build`): what a Tester / BA reader should not meet in B, C, D, H. The security block is skipped
+# (its steps carry payloads), and column J is only checked for run ids and length: its 'Kỹ thuật:' line is for DEV.
+LINE_MAX = 160                                     # characters per line of B, D, H, J: longer means several ideas
+_SYMBOLS = re.compile(r"[Σ∑→⇒≥≤×|]")
+_JARGON = re.compile(r"\b(?:vd|v\.v|API|view|dedup|NULL|NaN|MATCH|NM|DIFF|CTE|request|query|ô so sánh)\b|"
+                     r"\.(?:ts|html|java|sql|py|xml):\d")
+_NAMES = re.compile(r"\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b")      # TABLE_NAME / COLUMN_NAME (not checked in C: steps may type a code)
+_RUN_ID = re.compile(r"\b(?:[DUVP]\d{2}|run \d{8}-\d{6})\b")
+_BUG_ID = re.compile(r"BUG-\d+")
 
 
 def set_text(cell, value):
@@ -142,7 +131,7 @@ class Workbook(object):
         cap = lambda r: [copy.copy(sh.cell(r, c)._style) for c in range(1, 11)]
         self.st = {k: cap(r) for k, r in rows.items()}
         self.first = int(cfg.get("first_row", 12))
-        self.cases = []                       # (row, purpose) of every tc(), for sheet_coverage()
+        self.cases = []                       # (row, purpose) of every tc()
         self.pre_h = sh.row_dimensions[rows.get("pre", 13)].height
         for m in [str(m) for m in sh.merged_cells.ranges if m.min_row >= self.first]:
             sh.unmerge_cells(m)
@@ -185,6 +174,13 @@ class Workbook(object):
         r = self._put("pre", t, merge=True); self.ws.row_dimensions[r].height = self.pre_h
 
     def tc(self, purpose, steps, expected, basis=None, status=None, actual=None, bug=None, run=1):
+        """steps / expected / actual / basis: a string, or a list written one item per line (see the module doc).
+        bug: optional, the tracker's bug id once the Tester has logged it."""
+        steps = _lines(steps, number=True)
+        expected = _lines(expected, bullet=True)
+        if isinstance(actual, (list, tuple)):
+            actual = "\n".join([str(actual[0])] + ["- %s" % x for x in actual[1:]])
+        basis = _lines(basis)
         if status is None and not actual:
             actual = "Chưa thực hiện"
         if status in ("P", "F", "PE") and actual in (None, "", "P", "F", "PE"):
@@ -197,36 +193,6 @@ class Workbook(object):
             self.ws.cell(r, 9).value = bug
         self.cases.append((r, purpose))
         return r
-
-    def case_ids(self):
-        """{row: (purpose, case id as column A shows it, status of run 1)} for every tc() so far."""
-        return {r: (p, _case_id(self.ws, self.first - 1, self.ws[self.code_cell].value, r), self.ws.cell(r, 5).value)
-                for r, p in self.cases}
-
-    def sheet_coverage(self, rows, title, note=None):
-        """'Ma trận bao phủ': one row per requirement, pointing at the cases that test it.
-
-        rows: (source, item, requirement, case_keys, note)
-          source  'Quy tắc nghiệp vụ' / 'Quy chuẩn chung' / 'Bẫy dữ liệu (rt probe)' / 'Checklist' / ...
-          item    the rule (as in 'Quy tắc nghiệp vụ'), standard section, trap id (as probe.md prints it) or checklist item
-          case_keys  beginnings of the cases' 'Mục đích' (each must match at least one case, or ValueError)
-          note    required when case_keys is empty, and must then start with 'Không áp dụng' or 'Chưa phủ' + the reason
-        Case ids and the P/F/PE tally are filled in from the test case sheet.
-        """
-        import collections
-        ids, data = self.case_ids(), []
-        for i, (src, item, req, keys, nt) in enumerate(rows, 1):
-            keys, nt = list(keys or []), nt or ""
-            if not keys and not nt.startswith(COV_REASONS):
-                raise ValueError("coverage row %d (%s %s): no case - the note must start with %s" % (i, src, item, " / ".join(COV_REASONS)))
-            miss = [k for k in keys if not any(p.startswith(k) for p, _, _ in ids.values())]
-            if miss:
-                raise ValueError("coverage row %d (%s %s): no case whose 'Mục đích' starts with %r" % (i, src, item, miss))
-            hit = [(cid, st) for _, (p, cid, st) in sorted(ids.items()) if any(p.startswith(k) for k in keys)]
-            tally = collections.Counter(st or "chưa chạy" for _, st in hit)
-            data.append((i, src, item, req, ", ".join(c for c, _ in hit) or "-",
-                         ", ".join("%s: %d" % kv for kv in tally.items()) or "-", nt))
-        return self.table(COV_SHEET, title, COV_HEADERS, data, [6, 22, 26, 56, 30, 26, 52], note or COV_NOTE)
 
     def finish(self, run_date, run_note, author="", run=1):
         sh, last, f = self.ws, self.row - 1, self.first
@@ -245,133 +211,6 @@ class Workbook(object):
         fit_rows(sh, [r for r, _ in self.cases], cols=(2, 3, 4, 8, 9, 10))
         return last
 
-    def table(self, name, title, headers, rows, widths, note=None):
-        s = self.wb.create_sheet(name[:31])
-        s["A1"] = title; s["A1"].font = Font(name=self.FONT.name, size=13, bold=True)
-        if note:
-            s["A2"] = note; s["A2"].font = Font(name=self.FONT.name, size=11, italic=True)
-        for i, h in enumerate(headers, 1):
-            c = s.cell(4, i, h); c.font = self.FONT_B; c.fill = HEADER; c.border = BORDER
-            c.alignment = Alignment(wrap_text=True, vertical="center", horizontal="center")
-            s.column_dimensions[openpyxl.utils.get_column_letter(i)].width = widths[i - 1] if i <= len(widths) else 20
-        for r, vals in enumerate(rows, 5):
-            for i, v in enumerate(vals, 1):
-                c = set_text(s.cell(r, i), v); c.font = self.FONT; c.border = BORDER
-                c.alignment = Alignment(wrap_text=True, vertical="top")
-        s.freeze_panes = "A5"
-        fit_rows(s, range(4, 5 + len(rows)))
-        return s
-
-    def sheet_rules(self, rows, title, note):
-        """'Quy tắc nghiệp vụ': one row per rule the report applies (data scope, filters, calculations, display).
-
-        rows: tuples in RULE_HEADERS order without STT and without 'DEV xác nhận' (8 values):
-          (hạng mục, quy tắc, file:line, kết quả chạy, Quy chuẩn § or '-', đánh giá, BUG-xx / case ids, ghi chú)
-        'Đánh giá' is one of RULE_VERDICTS: Đúng (green), Lỗi (red), Lưu ý (yellow).
-        """
-        bad = [r[0] for r in rows if len(r) != 8 or r[5] not in RULE_VERDICTS]
-        if bad:
-            raise ValueError("sheet_rules: rows need 8 values and 'Đánh giá' in %s: %s" % (list(RULE_VERDICTS), bad))
-        data = [(i + 1,) + tuple(r) + ("",) for i, r in enumerate(rows)]
-        s = self.table(RULE_SHEET, title, RULE_HEADERS, data, [5, 24, 46, 40, 40, 30, 10, 16, 34, 14], note)
-        for r in range(5, 5 + len(data)):
-            s.cell(r, 7).fill = RULE_VERDICTS[s.cell(r, 7).value]
-        dv = DataValidation(type="list", formula1='"Đồng ý,Không đồng ý,Cần trao đổi"', allow_blank=True)
-        dv.add("J5:J%d" % (4 + len(data))); s.add_data_validation(dv)
-        return s
-
-    def sheet_bugs(self, rows, title, note=BUG_NOTE):
-        """rows: tuples in BUG_HEADERS order without the last column (7 values) - sheet_evidence() fills 'Hình ảnh minh chứng'."""
-        s = self.table("Danh sách lỗi", title, BUG_HEADERS, rows, [9, 12, 22, 46, 34, 46, 56, 30], note)
-        for r in range(5, 5 + len(rows)):
-            st = str(s.cell(r, 3).value or "")
-            s.cell(r, 3).fill = GREY if st.startswith(("Rút", "Đã đóng")) else (RED if st in ("Mở", "Mới") else YELLOW)
-        return s
-
-    def sheet_evidence(self, cards, title, note, no_image=None, out_dir=None, width_px=1000):
-        """'Hình ảnh lỗi': one picture per card (reportkit.evidence.card), placed right after 'Danh sách lỗi', each with a
-        title bar and a link back; 'Danh sách lỗi' column H links to the first picture of each bug.
-
-        note      when the pictures were taken, build, accounts, browser size, what was hidden to keep a picture short
-        no_image  {bug: reason} for a bug no picture can show (written as 'Không có hình: <reason>'); every other open
-                  bug without a card fails `rt build`
-        Empty title / severity / status / basis / cause of a card come from its row here (evidence.fill_from_bugs).
-        Cards are rendered to <workspace>/evidence/ (PNG + HTML) unless they already carry 'png'; one line per card is
-        printed with the lint warnings. Call after sheet_bugs().
-        """
-        from . import evidence as E
-        if "Danh sách lỗi" not in self.wb.sheetnames:
-            raise ValueError("call sheet_bugs() before sheet_evidence()")
-        bugs = self.wb["Danh sách lỗi"]
-        bug_row = {str(bugs.cell(r, 1).value).strip(): r for r in range(5, bugs.max_row + 1) if bugs.cell(r, 1).value}
-        no_image = dict(no_image or {})
-        unknown = sorted(({c["bug"] for c in cards} | set(no_image)) - set(bug_row))
-        if unknown:
-            raise ValueError("evidence for bugs that are not in 'Danh sách lỗi': %s" % unknown)
-        both = sorted({c["bug"] for c in cards} & set(no_image))
-        if both:
-            raise ValueError("bugs both with a card and in no_image: %s" % both)
-        empty = [b for b, why in no_image.items() if not str(why or "").strip()]
-        if empty:
-            raise ValueError("no_image needs the reason for: %s" % empty)
-        E.number(cards)
-        val = lambda r, c: str(bugs.cell(r, c).value or "").strip()
-        E.fill_from_bugs(cards, {b: {"severity": val(r, 2), "status": val(r, 3), "title": val(r, 4), "basis": val(r, 5),
-                                     "cause": val(r, 6)} for b, r in bug_row.items()})
-        if any("png" not in c for c in cards):
-            E.render(cards, out_dir or self.space.p("evidence", "x")[:-2])
-        s = self.wb.create_sheet(EVIDENCE_SHEET)
-        s.sheet_view.showGridLines = False
-        s.column_dimensions["A"].width = 2
-        set_text(s["B1"], title).font = Font(name=self.FONT.name, size=14, bold=True)
-        s.merge_cells("B2:P2")
-        c2 = set_text(s["B2"], note); c2.font = Font(name=self.FONT.name, size=11, italic=True)
-        c2.alignment = Alignment(wrap_text=True, vertical="top")
-        s.row_dimensions[2].height = max(30, 15 * (1 + len(str(note)) // 170) + 6)
-        r, first = 4, {}
-        for c in cards:
-            w, h = E.png_size(c["png"])
-            dh = int(round(h * width_px / float(w)))
-            s.merge_cells(start_row=r, start_column=2, end_row=r, end_column=16)
-            head = "%s%s - %s  [%s]" % (c["bug"], (" (%s)" % c["part"]) if c["part"] else "", c["title"], c["status"])
-            t = set_text(s.cell(r, 2), head)
-            t.font = Font(name=self.FONT.name, size=12, bold=True, color="FFFFFFFF")
-            t.fill = PatternFill("solid", fgColor="FF667085" if str(c["status"]).startswith(E.WITHDRAWN) else "FFB42318")
-            t.alignment = Alignment(vertical="center")
-            s.row_dimensions[r].height = 19.5
-            back = s.cell(r + 1, 2, "↩ Về Danh sách lỗi (%s)" % c["bug"])
-            back.hyperlink = Hyperlink(ref=back.coordinate, location="'Danh sách lỗi'!A%d" % bug_row[c["bug"]])
-            back.font = Font(name=self.FONT.name, size=11, color="FF0563C1", underline="single")
-            img = _Png(c["png"]); img.width, img.height = width_px, dh; img.anchor = "B%d" % (r + 2)
-            s.add_image(img)
-            row0, n = first.get(c["bug"], (r, 0)); first[c["bug"]] = (row0, n + 1)
-            r += 2 + int(math.ceil(dh / 20.0)) + 2          # default row = 15 pt = 20 px
-        hcol = BUG_HEADERS.index("Hình ảnh minh chứng") + 1
-        for b, rr in bug_row.items():
-            cell = bugs.cell(rr, hcol); cell.border = BORDER; cell.alignment = Alignment(wrap_text=True, vertical="top")
-            if b in first:
-                row0, n = first[b]
-                set_text(cell, "Xem hình %s%s" % (b, (" (1/%d) (+%d hình tiếp theo)" % (n, n - 1)) if n > 1 else ""))
-                cell.hyperlink = Hyperlink(ref=cell.coordinate, location="'%s'!B%d" % (EVIDENCE_SHEET, row0))
-                cell.font = Font(name=self.FONT.name, size=12, color="FF0563C1", underline="single")
-            elif b in no_image:
-                set_text(cell, "%s %s" % (NO_IMAGE, no_image[b])).font = self.FONT
-        self.wb.move_sheet(s, offset=self.wb.sheetnames.index("Danh sách lỗi") + 1 - self.wb.sheetnames.index(s.title))
-        return s
-
-    def sheet_details(self, rows, title, note, headers=None, widths=None):
-        return self.table("Chi tiết sai lệch dữ liệu", title, headers or DETAIL_HEADERS, rows, widths or [36, 16, 50, 20, 24, 52, 10], note)
-
-    def sheet_ba(self, rows, title):
-        data = [(i + 1,) + tuple(r) for i, r in enumerate(rows)]
-        s = self.table("BA làm rõ", title, BA_HEADERS, data, [6, 26, 90, 12, 16, 50])
-        for r in range(5, 5 + len(data)):
-            s.cell(r, 5).fill = GREEN if s.cell(r, 5).value == "Đã chốt" else YELLOW
-        return s
-
-    def sheet_sources(self, rows, title, headers, widths):
-        return self.table("Nguồn dữ liệu", title, headers, rows, widths)
-
     def save(self):
         self.wb.active = 0
         os.makedirs(os.path.dirname(self.out), exist_ok=True)
@@ -379,69 +218,15 @@ class Workbook(object):
         return self.out
 
 
-def details_from_run(run_dir, causes=None, labels=None):
-    """Rows for the 'Chi tiết sai lệch dữ liệu' sheet straight from the data comparison results.
-
-    causes: {variant name: (cause text, bug id)} - the first variant that explains a cell gives its cause / bug.
-    labels: {check id: text for the 'Chỉ tiêu / trường' column} (default: the entry's title).
-    """
-    import json
-    causes, labels, rows = causes or {}, labels or {}, []
-    for fn in sorted(os.listdir(run_dir)):
-        if not fn.endswith(".json") or fn == "summary.json":
-            continue
-        with open(os.path.join(run_dir, fn), encoding="utf-8") as f:
-            r = json.load(f)
-        if r.get("kind") != "data":
-            continue
-        for p in r.get("parts", []):
-            period = ", ".join("%s=%s" % kv for kv in (p.get("vars") or {}).items())
-            for m in p.get("mismatches", []):
-                expl = m.get("explained_by") or []
-                cause, bug = next((causes[v] for v in expl if v in causes), (", ".join(expl) or "chưa quy được nguyên nhân", ""))
-                key = "/".join(str(k) for k in m["key"] if k != "*")
-                rows.append(("%s %s%s" % (r["id"], period + " / " if period else "", key or "-"), m["field"],
-                             labels.get(r["id"], r.get("title")), str(m["actual"]), str(m["expected"]), cause, bug))
-    return rows
-
-
-class _Png(_XlImage):
-    """openpyxl image without Pillow: the kit only embeds the PNG cards it rendered.
-    Without Pillow, openpyxl drops every image when it LOADS a workbook - never patch a delivered workbook that has
-    pictures with load_workbook() + save(): rebuild it from build_workbook.py."""
-
-    def __init__(self, path):
-        from .evidence import png_size
-        self.ref = path
-        self.width, self.height = png_size(path)
-        self.format = "png"
-
-    def _data(self):
-        with open(self.ref, "rb") as f:
-            return f.read()
-
-
-def evidence_gate(path):
-    """Quality gate on the pictures: bugs of 'Danh sách lỗi' whose status is not 'Rút…' / 'Đã đóng' and whose
-    'Hình ảnh minh chứng' neither links to 'Hình ảnh lỗi' nor says 'Không có hình: <lý do>'."""
-    from .evidence import WITHDRAWN
-    wb = openpyxl.load_workbook(path)
-    if "Danh sách lỗi" not in wb.sheetnames:
-        return []
-    b = wb["Danh sách lỗi"]
-    hdr = [b.cell(4, c).value for c in range(1, b.max_column + 1)]
-    hcol = hdr.index("Hình ảnh minh chứng") + 1 if "Hình ảnh minh chứng" in hdr else None
-    missing = []
-    for r in range(5, b.max_row + 1):
-        bug = str(b.cell(r, 1).value or "").strip()
-        if not bug.startswith("BUG") or str(b.cell(r, 3).value or "").startswith(WITHDRAWN):
-            continue
-        cell = b.cell(r, hcol) if hcol else None
-        val = str(cell.value or "").strip() if cell is not None else ""
-        linked = cell is not None and cell.hyperlink is not None and bool(cell.hyperlink.location)
-        if not (linked or (val.startswith(NO_IMAGE) and len(val) > len(NO_IMAGE) + 3)):
-            missing.append(bug)
-    return missing
+def _lines(v, number=False, bullet=False):
+    """A list -> one item per line ('1. ' numbered or '- ' bulleted); a single item or a string is kept as is."""
+    if not isinstance(v, (list, tuple)):
+        return v
+    if len(v) == 1:
+        return str(v[0])
+    if number:
+        return "\n".join("%d. %s" % (i, x) for i, x in enumerate(v, 1))
+    return "\n".join(("- %s" % x) if bullet else str(x) for x in v)
 
 
 def _case_id(sh, hdr, code, r):
@@ -449,49 +234,36 @@ def _case_id(sh, hdr, code, r):
     return "%s_%d" % (code, sum(1 for rr in range(hdr, r + 1) if sh.cell(rr, 4).value not in (None, "")))
 
 
-def coverage_gate(path, probe_json=None, first_row=12, code_cell="D3"):
-    """Quality gate on the 'Ma trận bao phủ' sheet.
-
-    Returns {missing_sheet, rows_without_reason, traps_not_mapped, cases_not_referenced}. The first three block the build:
-      - rows_without_reason: STT of rows with no case and no 'Không áp dụng' / 'Chưa phủ' note
-      - traps_not_mapped: 'TABLE.trap_id' flagged FOUND in probe.json that no row names (trap id in 'Mục'; when the
-        same trap is FOUND on several tables, the row must also name the table, or name none of them)
-    cases_not_referenced is informative: cases that no requirement points to.
-    """
-    import json
-    wb = openpyxl.load_workbook(path)
-    res = {"missing_sheet": COV_SHEET not in wb.sheetnames, "rows_without_reason": [], "traps_not_mapped": [], "cases_not_referenced": []}
-    if res["missing_sheet"]:
-        return res
-    s = wb[COV_SHEET]
-    rows = [[s.cell(r, c).value for c in range(1, 8)] for r in range(5, s.max_row + 1) if s.cell(r, 1).value is not None]
-    res["rows_without_reason"] = [r[0] for r in rows if str(r[4] or "-").strip() in ("", "-") and not str(r[6] or "").startswith(COV_REASONS)]
-    if probe_json and os.path.exists(probe_json):
-        with open(probe_json, encoding="utf-8") as f:
-            tables = json.load(f).get("tables", {})
-        found = {}
-        for tb, t in tables.items():
-            for it in t.get("traps", []):
-                if it.get("flagged"):
-                    found.setdefault(it["id"], []).append(tb)
-        for tid, tbs in found.items():
-            for tb in tbs:
-                ok = False
-                for r in rows:
-                    if tid not in str(r[2] or ""):
-                        continue
-                    text = " ".join(str(v or "") for v in r[1:])
-                    if tb in text or not any(x in text for x in tbs):
-                        ok = True; break
-                if not ok:
-                    res["traps_not_mapped"].append("%s.%s" % (tb, tid))
-    sh = wb.worksheets[0]
-    code, hdr = sh[code_cell].value, first_row - 1
-    referenced = {x.strip() for r in rows for x in str(r[4] or "").split(",")}
-    res["cases_not_referenced"] = [cid for cid in (_case_id(sh, hdr, code, r) for r in range(first_row, sh.max_row + 1)
-                                                   if sh.cell(r, 4).value not in (None, "") and sh.cell(r, 2).value)
-                                   if cid not in referenced]
-    return res
+def readability(path, first_row=12, code_cell="D3"):
+    """Quality gate on the wording of the test case sheet, for a Tester / BA reader.
+    Returns [(case id, column letter, problem)]: H not starting with the verdict of column E, symbols or internal names
+    in B / C / D / H, a line longer than LINE_MAX, several bug ids in one case, run ids in J."""
+    sh = openpyxl.load_workbook(path).worksheets[0]
+    code, hdr, sec, out = sh[code_cell].value, first_row - 1, None, []
+    for r in range(first_row, sh.max_row + 1):
+        if sh.cell(r, 4).value is None:
+            if sh.cell(r, 2).value in ("Giao diện", "Chức năng", "An toàn thông tin"):
+                sec = sh.cell(r, 2).value
+            continue
+        cid = _case_id(sh, hdr, code, r)
+        txt = {L: str(sh.cell(r, c).value or "") for L, c in (("B", 2), ("C", 3), ("D", 4), ("H", 8), ("I", 9), ("J", 10))}
+        want = VERDICT.get(sh.cell(r, 5).value, VERDICT[None])
+        if not txt["H"].startswith(want):
+            out.append((cid, "H", "must start with '%s' (column E = %s)" % ("' / '".join(want), sh.cell(r, 5).value or "empty")))
+        if len(_BUG_ID.findall(txt["I"])) > 1:
+            out.append((cid, "I", "several bugs in one case: split it, one case per bug"))
+        if _RUN_ID.search(txt["J"]):
+            out.append((cid, "J", "run id (%s): means nothing to the reader, drop it" % _RUN_ID.search(txt["J"]).group(0)))
+        for L in ("B", "D", "H", "J"):
+            if any(len(x) > LINE_MAX for x in txt[L].split("\n")):
+                out.append((cid, L, "a line over %d characters: one idea per line" % LINE_MAX))
+        if sec == "An toàn thông tin":
+            continue
+        for L in ("B", "C", "D", "H"):
+            m = _SYMBOLS.search(txt[L]) or _JARGON.search(txt[L]) or (L != "C" and _NAMES.search(txt[L]))
+            if m:
+                out.append((cid, L, "'%s': write it in words, as the screen names it (technical names go to 'Kỹ thuật:' in J)" % m.group(0)))
+    return out
 
 
 def hidden_rows(path, first_row=12):
@@ -505,7 +277,7 @@ def tally(path, first_row=12):
     """Counts per section + rows whose 'Kết quả hiện tại' is empty or only a status (quality gate)."""
     import collections
     sh = openpyxl.load_workbook(path).worksheets[0]
-    sec, per, bad, f_no_bug = None, collections.defaultdict(collections.Counter), [], []
+    sec, per, bad = None, collections.defaultdict(collections.Counter), []
     for r in range(first_row, sh.max_row + 1):
         b = sh.cell(r, 2).value
         if sh.cell(r, 4).value is None and b in ("Giao diện", "Chức năng", "An toàn thông tin"):
@@ -515,6 +287,4 @@ def tally(path, first_row=12):
             per[sec][st] += 1
             if not sh.cell(r, 8).value or sh.cell(r, 8).value in ("P", "F", "PE"):
                 bad.append(r)
-            if st == "F" and not sh.cell(r, 9).value:
-                f_no_bug.append(r)
-    return {k: dict(v) for k, v in per.items()}, bad, f_no_bug
+    return {k: dict(v) for k, v in per.items()}, bad

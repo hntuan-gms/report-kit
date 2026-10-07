@@ -205,7 +205,7 @@ def test_engine_rejects_duplicate_ids(tmp_path, monkeypatch):
         engine.load(ws)
 
 
-# ---------------------------------------------------------------- coverage matrix + gate
+# ---------------------------------------------------------------- workbook
 def _mini_profile(tmp_path, extra=None):
     tools = tmp_path / "tools"; tools.mkdir(exist_ok=True)
     tpl = openpyxl.Workbook(); sh = tpl.active
@@ -218,36 +218,6 @@ def _mini_profile(tmp_path, extra=None):
     cfg.update(extra or {})
     (d / "project.yaml").write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
     return P.load(str(d))
-
-
-def test_coverage_sheet_ids_and_gate(tmp_path):
-    import json
-    from reportkit import workbook as W
-    prof = _mini_profile(tmp_path); ws = prof.workspace("X_1")
-    wb = W.Workbook(prof, ws, name="n", screen="s", ticket="T", ascii_name="N")
-    wb.chapter("Chức năng 1"); wb.cat("Giao diện")
-    wb.tc("Kiểm tra A", "1.", "kq A", status="P", actual="thấy A")
-    wb.sub("Dữ liệu")
-    wb.tc("Kiểm tra B", "1.", "kq B", status="F", actual="thấy B sai", bug="BUG-01")
-    wb.tc("Kiểm tra C", "1.", "kq C")
-    assert [cid for _, cid, _ in wb.case_ids().values()] == ["X_1_1", "X_1_2", "X_1_3"]
-    with pytest.raises(ValueError):
-        wb.sheet_coverage([("Quy tắc nghiệp vụ", "B1", "r", ["Kiểm tra Z"], "")], "t")         # no such case
-    with pytest.raises(ValueError):
-        wb.sheet_coverage([("Quy tắc nghiệp vụ", "B1", "r", [], "vì sao đó")], "t")            # no case and no reason
-    wb.sheet_coverage([("Quy tắc nghiệp vụ", "B1", "r1", ["Kiểm tra A", "Kiểm tra B"], ""),
-                       ("Bẫy dữ liệu (rt probe)", "lang_twins (T1)", "r2", ["Kiểm tra B"], ""),
-                       ("Quy chuẩn chung", "II.3", "r3", [], "Không áp dụng: không có ô ngày")], "t")
-    out = wb.save()
-    s = openpyxl.load_workbook(out)[W.COV_SHEET]
-    assert s["E5"].value == "X_1_1, X_1_2" and s["F5"].value == "P: 1, F: 1" and s["E7"].value == "-"
-    probe = tmp_path / "probe.json"
-    probe.write_text(json.dumps({"tables": {"T1": {"traps": [{"id": "lang_twins", "flagged": True}, {"id": "null_period", "flagged": False}]},
-                                            "T2": {"traps": [{"id": "lang_twins", "flagged": True}, {"id": "status_mix", "flagged": True}]}}}), encoding="utf-8")
-    g = W.coverage_gate(out, str(probe), first_row=12)
-    assert not g["missing_sheet"] and g["rows_without_reason"] == []
-    assert sorted(g["traps_not_mapped"]) == ["T2.lang_twins", "T2.status_mix"]
-    assert g["cases_not_referenced"] == ["X_1_3"]
 
 
 def _function_list(prof, rows, sheet_title="List chức năng"):
@@ -308,80 +278,41 @@ def test_siblings_share_screen_or_code(tmp_path):
     assert inputs.find_siblings(prof, "1E_119", inputs.find_function(prof, "1E_119")) == []
 
 
-def test_rules_sheet(tmp_path):
+
+
+def test_workbook_is_one_sheet_and_lists_become_lines(tmp_path):
     from reportkit import workbook as W
     prof = _mini_profile(tmp_path); ws = prof.workspace("X_1")
     wb = W.Workbook(prof, ws, name="n", screen="s", ticket="T", ascii_name="N")
-    with pytest.raises(ValueError):
-        wb.sheet_rules([("Phạm vi", "r", "a.sql:1", "kq", "-", "Sai", "", "")], "t", "n")         # verdict not in the list
-    wb.sheet_rules([("Phạm vi", "Chỉ tin đã duyệt", "a.sql:12", "118 công ty", "I.2", "Đúng", "X_1_3", ""),
-                    ("Hiển thị", "Mã sàn hiện tên", "b.java:40", "550 dòng hiện OTC", "III.1", "Lỗi", "BUG-02", "")], "t", "n")
-    s = openpyxl.load_workbook(wb.save())[W.RULE_SHEET]
-    assert [c.value for c in s[4]] == W.RULE_HEADERS
-    assert s["A6"].value == 2 and s["G6"].value == "Lỗi" and s["G6"].fill.fgColor.rgb == W.RED.fgColor.rgb
+    wb.chapter("Chức năng 1"); wb.cat("Giao diện")
+    r = wb.tc("Kiểm tra A", ["Chọn Năm = 2026", "Bấm [Tìm kiếm]"], ["Ý 1", "Ý 2"], basis="Căn cứ: thiết kế chức năng",
+              status="F", actual=["Sai.", "Ví dụ: công ty A hiện 0, đúng ra là 45.", "Nguyên nhân: chưa tính lại."])
+    wb.finish(run_date="06/10/2026", run_note="n")
+    book = openpyxl.load_workbook(wb.save())
+    assert len(book.sheetnames) == 1
+    sh = book.worksheets[0]
+    assert sh.cell(r, 3).value == "1. Chọn Năm = 2026\n2. Bấm [Tìm kiếm]" and sh.cell(r, 4).value == "- Ý 1\n- Ý 2"
+    assert sh.cell(r, 8).value == "Sai.\n- Ví dụ: công ty A hiện 0, đúng ra là 45.\n- Nguyên nhân: chưa tính lại."
 
 
-def _tiny_png(path, w=4, h=3):
-    import struct, zlib
-    raw = b"".join(b"\x00" + b"\xff\x00\x00" * w for _ in range(h))
-    chunk = lambda t, d: struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
-    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
-                     + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
-    return str(path)
-
-
-def test_evidence_sheet_links_and_gate(tmp_path):
-    from reportkit import evidence as E, workbook as W
+def test_readability_gate(tmp_path):
+    from reportkit import workbook as W
     prof = _mini_profile(tmp_path); ws = prof.workspace("X_1")
-    png = _tiny_png(tmp_path / "s.png")
     wb = W.Workbook(prof, ws, name="n", screen="s", ticket="T", ascii_name="N")
-    wb.chapter("Chức năng 1"); wb.tc("Kiểm tra A", "1.", "kq A", status="F", actual="thấy A sai", bug="BUG-01")
-    wb.sheet_bugs([("BUG-01", "Cao", "Mở", "m", "c", "n", "b"), ("BUG-02", "Thấp", "Mở", "m", "c", "n", "b"),
-                   ("BUG-03", "Thấp", "Mở", "m", "c", "n", "b"), ("BUG-04", "Thấp", "Rút lại", "m", "c", "n", "b")], "t")
-    mk = lambda bug: E.card(bug, ["bước 1"], "**sai**", "đúng", [E.shot(png, "ảnh")])
-    cards = [mk("BUG-01"), mk("BUG-01"), mk("BUG-02")]
-    for c in cards:
-        c["png"] = png                                   # pre-rendered: no browser needed
-    with pytest.raises(ValueError):
-        wb.sheet_evidence([mk("BUG-99")], "t", "n")      # bug not in 'Danh sách lỗi'
-    wb.sheet_evidence(cards, "t", "n")
-    assert [c["part"] for c in cards] == ["1/2", "2/2", ""]
-    assert cards[0]["title"] == "m" and cards[0]["severity"] == "Cao" and cards[0]["basis"] == "c" and cards[0]["cause"] == "n"
-    assert cards[0]["status"] == "Mở - còn lỗi " + cards[0]["captured"][:5]          # from the bug row + picture date
-    out = wb.save()
-    book = openpyxl.load_workbook(out)
-    assert book.sheetnames.index(W.EVIDENCE_SHEET) == book.sheetnames.index("Danh sách lỗi") + 1
-    b = book["Danh sách lỗi"]
-    assert b["H5"].value == "Xem hình BUG-01 (1/2) (+1 hình tiếp theo)" and b["H5"].hyperlink.location.endswith("!B4")
-    assert W.evidence_gate(out) == ["BUG-03"]            # BUG-04 is withdrawn
-
-
-def test_evidence_excel_panel_shows_file_formats(tmp_path):
-    from reportkit import evidence as E
-    x = openpyxl.Workbook(); sh = x.active
-    sh["A1"] = 1234567.5; sh["A1"].number_format = "#,##0.00"; sh["B1"] = 1234567
-    p = tmp_path / "f.xlsx"; x.save(p)
-    doc = E._excel_html(E.excel(str(p), "cap", bad=["B1"], extra={1: "1,234,567"}))
-    assert "1,234,567.50" in doc and ">1234567<" in doc and 'class="bad"' in doc and 'class="extra"' in doc
-    with pytest.raises(ValueError):
-        E.card("BUG-01", ["s"], "a", "e", [E.text("api", "500")])        # no screenshot -> captured required
-    with pytest.raises(ValueError):
-        E.text("api", "GET /x\nAuthorization: Bearer abcdefghijklmnop")      # credentials never go in a picture
-    E.text("api", "HTTP 500: ORA-00904 invalid identifier")
-
-
-def test_evidence_run_shot_and_lint(tmp_path):
-    import json
-    from reportkit import evidence as E
-    png = _tiny_png(tmp_path / "U07_final.png", w=200, h=100)
-    (tmp_path / "U07.json").write_text(json.dumps({"id": "U07", "boxes": {"shot": png, "boxes": {
-        "grid": [[10, 20, 100, 50]], "cells": [[30, 30, 10, 5], [60, 30, 10, 5]]}}}), encoding="utf-8")
-    p = E.run_shot(str(tmp_path), "U07", "cap", mark=["cells#1"], show=["grid"], pad=5)
-    assert p["crop"] == (5, 15, 110, 60) and p["boxes"] == [[60, 30, 10, 5]]
-    with pytest.raises(ValueError):
-        E.run_shot(str(tmp_path), "U07", "cap", mark=["nope"])
-    c = E.card("BUG-01", ["s"], "a", "e", [E.shot(png, "cap")], title="t", status="Mở", captured="01/01/2020 10:00")
-    w = E.lint(c, today="05/10/2026")
-    assert any("đánh dấu" in x for x in w) and any("hôm nay" in x for x in w)
-    c = E.card("BUG-01", ["s"], "a", "e", [p], title="t", status="Mở", captured="05/10/2026 10:00")
-    assert E.lint(c, today="05/10/2026") == []
+    wb.chapter("Chức năng 1"); wb.cat("Chức năng")
+    wb.tc("Kiểm tra Điểm", "1. Bấm [Tìm kiếm]", "Điểm = 100 trừ điểm bị trừ", status="P",
+          actual=["Đạt.", "Ví dụ: công ty BMK kỳ 08/2026 hiện 70, khớp."], basis="Căn cứ: thiết kế chức năng")       # clean
+    wb.tc("Kiểm tra Phân loại", "1. Bấm [Tìm kiếm]", "A ≥ 90", status="F",
+          actual="Sai. 222.032 ô so sánh, vd AMD", bug="BUG-01, BUG-02", basis="Căn cứ: x\nKỹ thuật: D01, EVALUATIONS.TYPE")
+    wb.tc("Kiểm tra tổng", "1. Bấm [Tìm kiếm]", "Tổng khớp", status="P", actual="Sai. " + "x" * 200)
+    wb.cat("An toàn thông tin")
+    wb.tc("Kiểm tra XSS", "1. Nhập <script>alert(1)</script> | ' OR 1=1 --", "Không chạy script", status="P", actual="Đạt. Hiện nguyên văn")
+    wb.finish(run_date="06/10/2026", run_note="n")
+    got = W.readability(wb.save())
+    assert not [x for x in got if x[0] in ("X_1_1", "X_1_4")]                      # clean case; security block skipped
+    two = {(c, why.split(":")[0].split(" (")[0]) for cid, c, why in got if cid == "X_1_2"}
+    assert ("D", "'≥'") in two and ("H", "'ô so sánh'") in two and ("I", "several bugs in one case") in two
+    assert ("J", "run id") in two
+    three = [(c, why) for cid, c, why in got if cid == "X_1_3"]
+    assert any(c == "H" and why.startswith("must start with 'Đạt.'") for c, why in three)
+    assert any(c == "H" and "160" in why for c, why in three)
