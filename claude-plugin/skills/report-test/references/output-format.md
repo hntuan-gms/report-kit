@@ -148,7 +148,7 @@ Always write cells through `tc()`: text starting with "=" is kept as text there.
 
 **Coverage gate.** `save()` writes no file while a requirement has neither a case (`covers=`) nor a reason (`waive()`), or while
 `covers` / `waive` names an id that does not exist (typo). Requirements: the `R<n>` rule lines of `analysis.md`, the
-`[FOUND]` traps of `probe.md` (`trap:<name>`), and the checklist areas (`area:<key>`, list in `test-areas.md`; a profile can
+transactions `T<n>` (`inputs/transactions.json`, see `transactions.md`), the `[FOUND]` traps of `probe.md` (`trap:<name>`), and the checklist areas (`area:<key>`, list in `test-areas.md`; a profile can
 replace it with `workbook.coverage.areas`). Each save writes `<workspace>/coverage.md`: requirement -> case ids or reason.
 Run `rt build <code> --check` until it passes (it builds `<workspace>/_check.xlsx`, uses up no version), then `rt build <code>`.
 An older `build_workbook.py` that calls `wb.sheet_*` or `reportkit.evidence` no longer runs: delete those calls.

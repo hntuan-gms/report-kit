@@ -10,6 +10,10 @@ inputs:
     code_columns: ["New UC Name"]           # where the report code is looked up (default: every column)
     columns: {jira: "Mã Jira", name: "New UC Name", system: "Phân hệ", menu: "Menu/tab (cấp thấp nhất)", ...}
     ticket: {column: testcase, regex: "^([A-Z]+-\\d+)_"}   # ticket taken from another column when there is no ticket column
+  transactions:                             # optional: what each function must offer, one row per user action
+    sheet: "Chi tiết transaction"           # in the function list file (or `glob` for another file)
+    system: "IDS"                           # the sheet lists only this Phân hệ (its Stt restarts for the others)
+    columns: {stt: "Stt", text: "Mô tả yêu cầu", kind: "Phân loại"}
   standard: {glob: "**/SRS_Quy_chuan_chung*.docx", summary: rules/standard.md}
   previous_workbooks: "*{code_nodash}*.xlsx"
 
@@ -184,6 +188,110 @@ def find_function(profile, code):
             row["system_key"] = profile.system_for_label(row.get("system"))
             return row
     raise SystemExit("Code %s not found in %s" % (code, src))
+
+
+# ------------------------------------------------------------------ transactions
+_ROLES = re.compile(r"^((?:[A-ZĐ]{2,}\s*[;,]\s*)*[A-ZĐ]{2,})")          # "LĐGSĐC; CVGSĐC" / "LĐTT,CVTT"
+_SYS_REPLY = re.compile(r"\.\s*(?=Hệ thống\b)")
+_TX_CACHE = {}
+
+
+def _norm(s):
+    return " ".join(str(s or "").split()).lower()
+
+
+def _stt(v):
+    s = str(v if v is not None else "").strip()
+    return int(float(s)) if re.fullmatch(r"\d+(?:\.0+)?", s) else None
+
+
+def _transaction_functions(profile):
+    """(source, {stt: {"name", "flag", "items": [(text, kind)]}}) of the transaction sheet.
+    A row with a number in Stt opens a function (its 'Phân loại' cell holds a change flag: Sửa / Bổ sung), a row with
+    another Stt (A, B.I...) is a section heading, a row with an empty Stt is one transaction of the open function."""
+    import openpyxl
+    tx = profile.get("inputs.transactions") or {}
+    fl = profile.get("inputs.function_list", {}) or {}
+    hits = _tools(profile, tx.get("glob") or fl.get("glob", "*.xlsx"))
+    if not hits:
+        raise SystemExit("Transaction sheet: file '%s' not found in %s" % (tx.get("glob") or fl.get("glob"), profile.tools_dir))
+    sheet = tx.get("sheet", "Chi tiết transaction")
+    key = (hits[0], os.path.getmtime(hits[0]), repr(tx))
+    if key in _TX_CACHE:
+        return _TX_CACHE[key]
+    wb = openpyxl.load_workbook(hits[0], data_only=True, read_only=True)
+    if sheet not in wb.sheetnames:
+        wb.close()
+        raise SystemExit("Transaction sheet '%s' not found in %s (sheets: %s)" % (sheet, hits[0], ", ".join(wb.sheetnames)))
+    grid = [list(r) for r in wb[sheet].iter_rows(values_only=True)]
+    wb.close()
+    cols = dict({"stt": "Stt", "text": "Mô tả yêu cầu", "kind": "Phân loại"}, **(tx.get("columns") or {}))
+    hdr_i, idx = None, {}
+    for i, r in enumerate(grid[:30]):
+        heads = {_norm(v): c for c, v in enumerate(r) if v not in (None, "")}
+        found = {k: next((c for h, c in heads.items() if h == _norm(v)), None)
+                 if k == "stt" else next((c for h, c in heads.items() if _norm(v) in h), None) for k, v in cols.items()}
+        if found["stt"] is not None and found["text"] is not None:
+            hdr_i, idx = i, found
+            break
+    if hdr_i is None:
+        raise SystemExit("Transaction sheet '%s' of %s: no header row with '%s' and '%s'" % (sheet, hits[0], cols["stt"], cols["text"]))
+    cell = lambda r, k: r[idx[k]] if idx.get(k) is not None and idx[k] < len(r) else None
+    funcs, cur = {}, None
+    for r in grid[hdr_i + 1:]:
+        stt, text = cell(r, "stt"), cell(r, "text")
+        if _stt(stt) is not None:
+            flag = cell(r, "kind")
+            cur = funcs.setdefault(_stt(stt), {"name": " ".join(str(text or "").split()),
+                                               "flag": str(flag).strip() if flag else None, "items": []})
+        elif stt not in (None, ""):
+            cur = None
+        elif cur is not None and text not in (None, "") and str(text).strip():
+            cur["items"].append((" ".join(str(text).split()), str(cell(r, "kind") or "").strip() or None))
+    _TX_CACHE[key] = ("%s [%s]" % (hits[0], sheet), funcs)
+    return _TX_CACHE[key]
+
+
+def split_transaction(text):
+    """'LĐGSĐC; CVGSĐC xem X. Hệ thống hiển thị Y' -> (['LĐGSĐC', 'CVGSĐC'], 'xem X', 'Hệ thống hiển thị Y')."""
+    m = _ROLES.match(text)
+    roles = [x for x in re.split(r"\s*[;,]\s*", m.group(1)) if x] if m else []
+    rest = text[m.end():].strip() if m else text
+    parts = _SYS_REPLY.split(rest, 1)
+    return roles, parts[0].strip().rstrip("."), (parts[1].strip() if len(parts) > 1 else "")
+
+
+def find_transactions(profile, fn):
+    """The function's transactions: what each role does and what the system answers (profile inputs.transactions).
+    None when the profile has no transaction sheet. Otherwise {"source", "name", "flag", "note", "items": [{"id": "T1",
+    "text", "roles", "action", "reply", "kind"}]}; items is empty, with the reason in "note", when the sheet does not
+    list the function. Joined on Stt within the sheet's system, and checked on the name ('Mô tả yêu cầu')."""
+    tx = profile.get("inputs.transactions")
+    if not tx:
+        return None
+    out = {"source": None, "name": None, "flag": None, "note": None, "items": []}
+    if tx.get("system") and _norm(fn.get("system")) != _norm(tx["system"]):
+        out["note"] = "the sheet lists only %s functions, this one is %s" % (tx["system"], fn.get("system") or "of no system")
+        return out
+    src, funcs = _transaction_functions(profile)
+    out["source"] = src
+    want = _norm(fn.get("description"))
+    stt = _stt(fn.get("stt"))
+    f = funcs.get(stt) if stt is not None else None
+    if f is not None and want and _norm(f["name"]) != want:
+        f = None
+    if f is None and want:
+        same = [g for g in funcs.values() if _norm(g["name"]) == want]
+        f = same[0] if len(same) == 1 else None
+    if f is None:
+        out["note"] = ("Stt %s is '%s' in the sheet, the function list says '%s'" % (stt, funcs[stt]["name"], fn.get("description"))
+                       if stt in funcs else "function not in the sheet (Stt %s, '%s')" % (stt, fn.get("description")))
+        return out
+    out.update(name=f["name"], flag=f["flag"])
+    for i, (text, kind) in enumerate(f["items"], 1):
+        roles, action, reply = split_transaction(text)
+        out["items"].append({"id": "T%d" % i, "text": text, "roles": roles, "action": action, "reply": reply, "kind": kind})
+    return out
 
 
 def menu_path(fn):

@@ -19,6 +19,7 @@ item (the verdict) stays as is and the others get "- ".
 Coverage (enforced by save()): every requirement must have a case or a stated reason, otherwise no file is written.
 Requirements are read from the workspace:
   - analysis.md: every rule line that starts with its id ("R1. ...", "- R2: ...", "| R3 | ..."), id "R1";
+  - inputs/transactions.json (written by `rt start` from the function list's transaction sheet): id "T1", "T2"...;
   - probe.md: every "[FOUND] <trap>:" line, id "trap:<trap>";
   - the checklist areas of test-areas.md (COVERAGE_AREAS, or profile workbook.coverage.areas), id "area:<key>".
     wb.tc(..., covers=["R4", "trap:lang_twins", "area:bo_loc"])
@@ -38,6 +39,7 @@ Profile block (defaults shown are the KBKT template):
     font: "Times New Roman"
 """
 import copy
+import json
 import os
 import re
 
@@ -84,8 +86,8 @@ _TRAP_LINE = re.compile(r"^\s*-\s*\[FOUND\]\s*([A-Za-z0-9_]+)\s*:\s*(.*)$")
 
 
 def requirements(ws_dir, areas=None):
-    """{id: (source, text)} of everything the workbook must cover: rule ids of analysis.md, FOUND traps of probe.md,
-    checklist areas. analysis.md must exist and number its rules (R1, R2, ...)."""
+    """{id: (source, text)} of everything the workbook must cover: rule ids of analysis.md, the function's transactions,
+    FOUND traps of probe.md, checklist areas. analysis.md must exist and number its rules (R1, R2, ...)."""
     path = os.path.join(ws_dir, "analysis.md")
     if not os.path.exists(path):
         raise SystemExit("coverage: %s is missing. Write it first (SKILL.md step 3): every rule on its own line, "
@@ -98,6 +100,11 @@ def requirements(ws_dir, areas=None):
                 req[m.group(1)] = ("analysis.md", m.group(2).strip()[:140])
     if not req:
         raise SystemExit("coverage: analysis.md has no numbered rule. Start each rule line with its id: 'R1. ...'")
+    tx = os.path.join(ws_dir, "inputs", "transactions.json")
+    if os.path.exists(tx):
+        with open(tx, encoding="utf-8") as f:
+            for t in json.load(f).get("items") or []:
+                req[t["id"]] = ("transaction", t["text"][:140])
     probe = os.path.join(ws_dir, "probe.md")
     if os.path.exists(probe):
         with open(probe, encoding="utf-8") as f:

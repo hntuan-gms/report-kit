@@ -33,7 +33,7 @@ Verdicts:
 - **P**: the behaviour matches 1-6.
 - **F**: it breaks 1, 1b, 2, 3, 4 or 5. An F needs **two independent sources**: the observation plus a screenshot, the code or the API response.
 - **PE**: not used for business questions. When the Quy chuẩn chung is silent or ambiguous and the point needs a business decision, decide it as BA (below), record it, and judge P / F against it. Use PE only when the user asks to leave a point for the real BA. "The business might want something else" is never a PE on its own: the code is the rule unless a decision is needed.
-- **No case** for a function the code does not implement (no field, no column, no button): there is nothing to run. A half-built function (a service method nobody calls, labels with no field) gets no case either; tell the user about it in the hand-off message, not in the workbook.
+- **No case** for a function the code does not implement (no field, no column, no button): there is nothing to run. Exception: an action a transaction asks for gets one F case (`references/transactions.md`). A half-built function (a service method nobody calls, labels with no field) gets no case either; tell the user about it in the hand-off message, not in the workbook.
 
 ## Acting as BA (group conventions)
 
@@ -87,10 +87,11 @@ Never renumber or reuse a Q id. To change a decision, edit its row and add the d
 
 Measured on 1B_40, 1D_104, 1D_107 and 1D_113 (`tools/token_usage.py` in the report-kit repo): 110-150 turns per report, and the context grows from about 50k to 400k tokens, so each turn re-reads up to 400k. That came to 28-43M cache-read tokens per report. The cost is **turns × context**: keep both small. Nothing here relaxes a rule above, a gate of `rt build`, or the content of a case.
 
-- **Split the heavy phases into subagents.** Use general-purpose agents in the foreground. Each one reads this SKILL.md and works through files in the workspace. The main session keeps the judging (step 8), the workbook (step 9) and every question to the user.
-  - *Trace agent* (step 3). Give it `brief.md`, the group file and the rules it needs. It follows the code chain and writes `analysis.md` exactly as step 3 says (R-ids, `file:line`, Quy chuẩn section, half-built functions). It returns at most 40 lines: the R list, the rules that already look wrong, and the half-built functions. Then you read `analysis.md` once, in full: you are responsible for it. Open a code file yourself only to settle a doubt, and only the lines in question.
-  - *Measure agent* (step 7). Give it `analysis.md`, `probe.md`, `references/checks-guide.md` and what each case needs measured. It writes `checks.yaml` (starting from the newest sibling's `gen_checks.py` / `checks.yaml`, if any), runs `rt check`, and fixes every NM / ERR that comes from the measurement with `rt check --redo` until none is left. It returns the run id and the entries still NM / ERR with the reason. Then you read `summary.md` once.
-  - State the terms the user approved (account, SELECT, demo / UAT) in the agent's prompt: an agent cannot ask. An agent that stops halfway is resumed with SendMessage, not respawned. Ask the same agent for a later re-measure instead of doing it yourself.
+- **Split the heavy phases into subagents, one level deep.** Only the session the user talks to spawns agents; an agent never spawns one, and its prompt never says it may. Spawn general-purpose agents in the foreground, never with `run_in_background`: a parent waiting on a background agent ends its turn and has to be woken up. The main session keeps the judging (step 8), the workbook (step 9) and every question to the user.
+  - *The prompt* holds the code and workspace, the terms the user approved (account, SELECT, demo / UAT: an agent cannot ask), what is already done, and the SKILL.md sections to read by heading (grep it, then Read only that section), never "read SKILL.md in full".
+  - *Trace agent* (step 3). Sections "What a verdict is based on" and step 3, plus `brief.md` and the group file; it greps the standard by section. It follows the code chain and writes `analysis.md` exactly as step 3 says (R-ids, `file:line`, Quy chuẩn section, half-built functions, and the `T` lines when `brief.md` lists transactions). It returns at most 40 lines: the R list, the rules that already look wrong, and the half-built functions. Then you read `analysis.md` once, in full: you are responsible for it. Open a code file yourself only to settle a doubt, and only the lines in question.
+  - *Measure agent* (step 7). Step 7 and `references/checks-guide.md`, plus `analysis.md`, `probe.md` and what each case needs measured. It writes `checks.yaml` (starting from the newest sibling's `gen_checks.py` / `checks.yaml`, if any), runs `rt check`, and fixes every NM / ERR that comes from the measurement with `rt check --redo` until none is left. It returns the run id and the entries still NM / ERR with the reason. Then you read `summary.md` once.
+  - An agent that stops halfway is resumed with SendMessage, not respawned. Ask the same agent for a later re-measure instead of doing it yourself.
 - **Small tool output.**
   - Never `cat` a whole code file, reference file or sibling workspace file. Grep `-n` for the place, then Read with offset / limit (≤ 80 lines).
   - From a sibling's `analysis.md`, grep the `R\d+\.` lines.
@@ -107,10 +108,10 @@ Measured on 1B_40, 1D_104, 1D_107 and 1D_113 (`tools/token_usage.py` in the repo
 - **Screenshots**: open one only when a verdict depends on what the picture shows (layout, truncation, zoom). An image stays in the context for every later turn.
 
 ### Several reports in one request (`/report-test 1D_110 1D_111 ...`)
-1. Run `rt doctor` and `rt login` once. Read the standard, the group files, `environment.md` and `lessons.md` once.
+1. Run `rt doctor` and `rt login` once. Don't read the standard, the group files, `environment.md` or `lessons.md` here: each report agent reads them, and the batch session never judges.
 2. Do `rt start` for each code, and list the siblings and shared code files from the briefs.
 3. Ask step 4 **once for the whole batch**: account per report, SELECT, demo / UAT, unknown tickets.
-4. Run the reports **one after another**, never in parallel (one browser session, one account). For each report, spawn one general-purpose agent that runs steps 3-9 of this skill for that code. Reports that share one screen (siblings) go to the same agent, so the shared code is read once. Give it the approved terms, the group decisions already taken in this batch, and the newest sibling workspace to start from.
+4. Run the reports **one after another**, never in parallel (one browser session, one account). For each report, spawn one general-purpose agent in the foreground that runs steps 3-9 of this skill for that code **itself**: it reads SKILL.md except this section, and it has no trace or measure agent of its own (one level deep, see above). Reports that share one screen (siblings) go to the same agent, so the shared code is read once. Give it the approved terms, the group decisions already taken in this batch, the route when you found it, and the newest sibling workspace to start from.
 5. The agent returns the hand-off message (step 10) in at most 40 lines. Group convention items it added are written in the group file, as usual.
 6. Your final message combines the hand-offs: one block per report.
 
@@ -125,6 +126,7 @@ Do the steps in order and don't skip one. Each step leaves files in the workspac
 
 2. **Gather the inputs: `rt start <code>`.** Then read the printed `brief.md`. It gives:
    - the function row (name, Jira key, ticket, system, menu path, status) and the **function list notes** (BA / Tester notes, "Có thể thay thế bằng");
+   - the **transactions** `T1`, `T2`... when the function list has them. Then read `references/transactions.md` once; otherwise skip it;
    - the standard document (or the profile's summary);
    - previous workbooks with the number of reviewer comments;
    - **sibling reports**, when another report uses the same screen or the same main code files;
@@ -198,7 +200,7 @@ Do the steps in order and don't skip one. Each step leaves files in the workspac
    - **Write it for a Tester / BA** (`output-format.md`, "Writing for a Tester / BA"): one case per check and per bug, one idea per line, words not symbols, names as the screen shows them. H starts with the verdict, then `Ví dụ` / `Phạm vi` / `Nguyên nhân`. Pass lists to `wb.tc()`.
    - **It always ends with "An toàn thông tin"** (XSS + SQL Injection, `references/test-areas.md`), measured in step 7 like any other entry.
    - **Complete = every requirement has a case. `rt build` enforces it** and writes no file while one is missing:
-     - the requirements are the rule ids of `analysis.md` (`R1`...), the FOUND traps of `probe.md` (`trap:<name>`) and the checklist areas of `test-areas.md` (`area:<key>`);
+     - the requirements are the rule ids of `analysis.md` (`R1`...), the transactions (`T1`...), the FOUND traps of `probe.md` (`trap:<name>`) and the checklist areas of `test-areas.md` (`area:<key>`);
      - tag each case with what it covers: `wb.tc(..., covers=["R4", "trap:lang_twins", "area:bo_loc"])`. A rule branch with no data still gets its own case ("Chưa thực hiện - cần dữ liệu");
      - a requirement with no case gets `wb.waive("R9", "reason")`; the reasons go in the hand-off, never in the sheet;
      - run `rt build <code> --check` first: it builds `<workspace>/_check.xlsx` with every gate and uses up no version. `coverage.md` in the workspace lists requirement -> case or reason.
@@ -206,7 +208,7 @@ Do the steps in order and don't skip one. Each step leaves files in the workspac
    - The file name comes from the profile. Never overwrite a delivered version: bump `version`.
    - `rt build` runs the quality gate: coverage (above), every case has a concrete H, no row is hidden, and the wording check (verdict first, no line over 160 characters, no symbols or internal names in B C D H, no run id in J, one bug per case). Fix every line it lists and rebuild.
 
-10. **Hand off** (`output-format.md`, "Hand-off message"): audience line, path, counts, data comparison in one line, bugs one line each, what was not run, what changed, requirements without a case, half-built functions, group conventions added or changed.
+10. **Hand off** (`output-format.md`, "Hand-off message"): audience line, path, counts, data comparison in one line, bugs one line each, what was not run, what changed, requirements without a case, transactions the function does not offer, roles not logged in as, half-built functions, group conventions added or changed.
 
 ## Reviewer comments on a delivered workbook
 
@@ -221,3 +223,4 @@ Do the steps in order and don't skip one. Each step leaves files in the workspac
 - `references/checks-guide.md`: the `checks.yaml` format, with worked examples.
 - `references/output-format.md`: the workbook, column by column, and the hand-off.
 - `references/pitfalls.md`: technical pitfalls that apply to any project.
+- `references/transactions.md`: only when `brief.md` lists transactions.
