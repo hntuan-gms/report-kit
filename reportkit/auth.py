@@ -38,7 +38,8 @@ def login(profile, system, login_type=None, headless=True):
         pg.locator(a.get("password", "#password")).fill(profile.secret("login_password"))
         pg.locator(a.get("submit", "#kc-login")).click()
         pg.wait_for_url(lambda u: u.startswith(web), timeout=60000)
-        pg.wait_for_load_state("load"); pg.wait_for_timeout(3000)
+        pg.wait_for_function("() => location.pathname !== '/auth/sign-in'", timeout=60000)
+        pg.wait_for_timeout(3000)
         ctx.storage_state(path=state)
         jar = requests.cookies.RequestsCookieJar()
         for c in ctx.cookies():
