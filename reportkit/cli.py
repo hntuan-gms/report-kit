@@ -2,7 +2,8 @@
 
   rt init                      create .report-kit/ (profile skeleton) in the current project
   rt doctor [--db]             check Python packages, browser, profile, secrets, web reachability (DB only with --db)
-  rt start <code> [--route R]  find the function, dump standard / previous workbook, trace the code from the menu -> brief.md
+  rt start <code> [--route R]  find the function and its transactions, dump standard / previous workbook, trace the code
+                               from the menu -> brief.md
   rt login [--system S]        log in through the real SSO page, save the session
   rt probe <code> [--tables]   run the profile's data traps on the report's tables -> probe.md
   rt check <code> [--only ids] [--redo] [--kind data|ui]    run checks.yaml -> runs/<id>/summary.md
@@ -134,7 +135,31 @@ def cmd_start(a):
     else:
         L.append("- group %s conventions: none yet. At the first decision you take as BA, create %s "
                  "(SKILL.md 'Acting as BA')" % (gkey, gpath))
-    sibs = inputs.find_siblings(prof, code, fn, trace=t, workspaces_root=os.path.dirname(ws.dir))
+    tx = inputs.find_transactions(prof, fn)
+    txp = ws.p("inputs", "transactions.json")
+    if tx is None:
+        if os.path.exists(txp):
+            os.remove(txp)                    # the profile no longer has a transaction sheet: no stale requirements
+    else:
+        with open(txp, "w", encoding="utf-8") as f:
+            json.dump(dict(tx, code=code), f, ensure_ascii=False, indent=1)
+        L += ["", "## Transactions: what the function must offer (SKILL.md 'Transactions')"]
+        if not tx["items"]:
+            L.append("- none: %s. Coverage comes from the code only." % tx["note"])
+        else:
+            L.append("Source: %s. Each T is a requirement of the coverage gate: a case with covers=[\"T1\"] or "
+                     "wb.waive(\"T1\", reason). 'Phân loại' is the BA's sizing, not read / write." % tx["source"])
+            if tx["flag"]:
+                L.append("**Marked '%s' in the sheet: the requirement changed%s.**" % (
+                    tx["flag"], "; check the previous workbook against every T" if prev_out else ""))
+            L.append("")
+            for x in tx["items"]:              # not `t`: that is the code trace, used below
+                L.append("- **%s** [%s] %s: %s%s" % (x["id"], x["kind"] or "-", ", ".join(x["roles"]) or "Hệ thống",
+                                                    x["action"], (" -> " + x["reply"]) if x["reply"] else ""))
+            roles = sorted({r for x in tx["items"] for r in x["roles"]})
+            if roles:
+                L.append("- roles named: %s (step 4: an account of each kind that the cases need)" % ", ".join(roles))
+    sibs =inputs.find_siblings(prof, code, fn, trace=t, workspaces_root=os.path.dirname(ws.dir))
     if sibs:
         L += ["", "## Sibling reports - SAME SCREEN OR SAME CODE: test the difference, don't copy",
               "These functions share this one's screen or its main code files, so they are probably the same screen for another",
@@ -150,7 +175,7 @@ def cmd_start(a):
     with open(ws.p("brief.md"), "w", encoding="utf-8") as f:
         f.write(brief)
     ws.mark("start", std=std_doc, prev=[x[0] for x in prev_out], siblings=[s["code"] for s in sibs], trace=t.get("method"),
-            group=gkey)
+            group=gkey, transactions=len(tx["items"]) if tx else None)
     _out(brief)
 
 

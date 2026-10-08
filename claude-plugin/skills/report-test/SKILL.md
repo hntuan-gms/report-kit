@@ -19,7 +19,7 @@ The project profile is `.report-kit/` in the repo. Its `rules/` folder holds:
 
 ## What a verdict is based on
 
-No SRS is read. The deployed system and its code describe what the function does; the workbook checks that it does it correctly and consistently. In this order:
+No SRS is read. **What** the function must offer comes from its **transactions** in the function list (see "Transactions"): which actions, for which roles. **How** it does them is described by the deployed system and its code; the workbook checks that it does them correctly and consistently. In this order:
 
 1. **Quy chuẩn chung** (the project standard: the original document if found, otherwise `.report-kit/rules/standard.md`). It overrides the code on everything it covers.
 1b. **The group's conventions** (`rules/groups/<group>.md`): points the Quy chuẩn chung does not settle for this function group, decided by Claude acting as BA (see "Acting as BA"). They override the code on what they cover and never contradict the Quy chuẩn chung.
@@ -31,9 +31,29 @@ No SRS is read. The deployed system and its code describe what the function does
 
 Verdicts:
 - **P**: the behaviour matches 1-6.
-- **F**: it breaks 1, 1b, 2, 3, 4 or 5. An F needs **two independent sources**: the observation plus a screenshot, the code or the API response.
+- **F**: it breaks 1, 1b, 2, 3, 4 or 5, or the function does not offer one of its transactions. An F needs **two independent sources**: the observation plus a screenshot, the code or the API response.
 - **PE**: not used for business questions. When the Quy chuẩn chung is silent or ambiguous and the point needs a business decision, decide it as BA (below), record it, and judge P / F against it. Use PE only when the user asks to leave a point for the real BA. "The business might want something else" is never a PE on its own: the code is the rule unless a decision is needed.
-- **No case** for a function the code does not implement (no field, no column, no button): there is nothing to run. A half-built function (a service method nobody calls, labels with no field) gets no case either; tell the user about it in the hand-off message, not in the workbook.
+- **No case** for a function the code does not implement (no field, no column, no button) **unless a transaction asks for it**: then it gets an F case (see "Transactions"). Otherwise there is nothing to run. A half-built function (a service method nobody calls, labels with no field) gets no case either; tell the user about it in the hand-off message, not in the workbook.
+
+## Transactions (what the function must offer)
+
+The function list has a sheet "Chi tiết transaction". For each function, it lists one row per user action: who does it, what they do, and what the system answers ("LĐGSĐC; CVGSĐC xem tổng hợp báo cáo giao dịch. Hệ thống hiển thị thông tin thống kê"). `rt start` reads them into `inputs/transactions.json` and lists them in `brief.md` as `T1`, `T2`... with the roles. They say **what** must exist and **who** uses it, never how: statuses, scope, formulas, labels still come from the code, the Quy chuẩn chung and the group conventions.
+
+- **A transaction is a requirement, not a test case.** Each `T` needs at least one case (`covers=["T3"]`), and usually several: the main behaviour, the data, the filters, the permission for the roles it names. One case may cover several `T`. `rt build` fails while a `T` has neither a case nor a reason.
+- **The 'Phân loại' column** (Dữ liệu đầu vào / Yêu cầu truy vấn / Dữ liệu đầu ra) is the BA's sizing. It says nothing about read or write: "xem" rows are marked "Dữ liệu đầu vào". Classify the action by what its handler does.
+- **A function marked "Sửa" or "Bổ sung"** has a changed requirement. Check the previous workbook against every `T` before reusing its cases, and say in the hand-off which `T` the previous version did not cover.
+- **No transactions** (the sheet covers only IDS; a KT function prints "none" in `brief.md`): coverage comes from the code as before.
+
+For each `T`, find in step 3 where the code implements it, then:
+
+| Situation | In the workbook |
+|---|---|
+| Implemented on this screen | Cases as usual, `covers=["T3", ...]`. |
+| Implemented on another screen or by another function, or done by a scheduled job instead of the user | No case: `wb.waive("T3", "Thuộc màn hình ... / chức năng 1D_xxx, xem workbook ...")` or `"Hệ thống tự chạy theo lịch, kết quả kiểm tra ở case ..."`. When it is unclear whether that satisfies the transaction, decide as BA (group file) first. |
+| Not implemented anywhere: not on the screen, no route, no endpoint, no handler | **One F case.** B: the action in the screen's words. D: what the transaction says the system does. H: `Sai.` then `Không có chức năng ...` and where you looked (menu, screen, buttons). J: the basis line, then `Kỹ thuật:` the code search (no route / API / handler for it). Two sources: the screenshot of the screen and the code search. |
+| Implemented, but it can't be run here | A case with the reason: "Chưa thực hiện - cần dữ liệu", "- cần tài khoản <vai trò>", "- thao tác ghi dữ liệu trên môi trường dùng chung, chưa được phép". Actions that write data (thiết lập, sửa, xoá, kích hoạt job) follow the safety rules: ask the user first, never run them on your own. |
+
+Basis line of a case that rests on a transaction: `Căn cứ: Danh sách chức năng, yêu cầu "<the action, as in brief.md>"`.
 
 ## Acting as BA (group conventions)
 
@@ -97,6 +117,7 @@ Do the steps in order and don't skip one. Each step leaves files in the workspac
 
 2. **Gather the inputs: `rt start <code>`.** Then read the printed `brief.md`. It gives:
    - the function row (name, Jira key, ticket, system, menu path, status) and the **function list notes** (BA / Tester notes, "Có thể thay thế bằng");
+   - the **transactions** `T1`, `T2`... with their roles, and the "Sửa" / "Bổ sung" flag (see "Transactions");
    - the standard document (or the profile's summary);
    - previous workbooks with the number of reviewer comments;
    - **sibling reports**, when another report uses the same screen or the same main code files;
@@ -127,11 +148,12 @@ Do the steps in order and don't skip one. Each step leaves files in the workspac
      - the rules, one line each, **in plain words** ("chỉ lấy tin đã duyệt, tiếng Việt; bản đính chính mới nhất thay bản gốc") with `file:line`.
        **Start each rule line with its id: `R1. ...`, `R2. ...`.** The ids are the requirements the coverage gate of `rt build` checks;
      - for each rule, the Quy chuẩn section it falls under, and whether it already looks wrong by 1-4 above;
+     - for each transaction, one line `T3: <where it is implemented, file:line>` or `T3: không có - <what you searched>`, and the rules `R` it leads to;
      - functions that are half built (code present but not wired), for the hand-off message.
    - For a large report, delegate the tracing to an Explore agent and keep only its conclusions.
 
 4. **Ask the user once**, in a single question, before touching the environment:
-   - which account to use: a super admin can't reproduce data-permission cases. With a sibling report, ask for the account type that makes this one different (e.g. a public-company login);
+   - which account to use: a super admin can't reproduce data-permission cases. With a sibling report, ask for the account type that makes this one different (e.g. a public-company login). Name the roles the transactions list ("roles named" in `brief.md`) that the cases need;
    - OK to run read-only SELECTs this session?
    - is another team demoing or doing UAT on the environment?
    - an unknown ticket number. Do not ask business questions: decide them as BA ("Acting as BA").
@@ -170,15 +192,15 @@ Do the steps in order and don't skip one. Each step leaves files in the workspac
    - **Write it for a Tester / BA** (`output-format.md`, "Writing for a Tester / BA"): one case per check and per bug, one idea per line, words not symbols, names as the screen shows them. H starts with the verdict, then `Ví dụ` / `Phạm vi` / `Nguyên nhân`. Pass lists to `wb.tc()`.
    - **It always ends with "An toàn thông tin"** (XSS + SQL Injection, `references/test-areas.md`), measured in step 7 like any other entry.
    - **Complete = every requirement has a case. `rt build` enforces it** and writes no file while one is missing:
-     - the requirements are the rule ids of `analysis.md` (`R1`...), the FOUND traps of `probe.md` (`trap:<name>`) and the checklist areas of `test-areas.md` (`area:<key>`);
-     - tag each case with what it covers: `wb.tc(..., covers=["R4", "trap:lang_twins", "area:bo_loc"])`. A rule branch with no data still gets its own case ("Chưa thực hiện - cần dữ liệu");
+     - the requirements are the rule ids of `analysis.md` (`R1`...), the transactions (`T1`...), the FOUND traps of `probe.md` (`trap:<name>`) and the checklist areas of `test-areas.md` (`area:<key>`);
+     - tag each case with what it covers: `wb.tc(..., covers=["T2", "R4", "trap:lang_twins", "area:bo_loc"])`. A rule branch with no data still gets its own case ("Chưa thực hiện - cần dữ liệu");
      - a requirement with no case gets `wb.waive("R9", "reason")`; the reasons go in the hand-off, never in the sheet;
      - run `rt build <code> --check` first: it builds `<workspace>/_check.xlsx` with every gate and uses up no version. `coverage.md` in the workspace lists requirement -> case or reason.
      - The gate checks that every requirement is named, not that the case is right: still re-read each P whose claim covers several years or periods (e.g. a deadline in a year with no holiday calendar).
    - The file name comes from the profile. Never overwrite a delivered version: bump `version`.
    - `rt build` runs the quality gate: coverage (above), every case has a concrete H, no row is hidden, and the wording check (verdict first, no line over 160 characters, no symbols or internal names in B C D H, no run id in J, one bug per case). Fix every line it lists and rebuild.
 
-10. **Hand off** (`output-format.md`, "Hand-off message"): audience line, path, counts, data comparison in one line, bugs one line each, what was not run, what changed, requirements without a case, half-built functions, group conventions added or changed.
+10. **Hand off** (`output-format.md`, "Hand-off message"): audience line, path, counts, data comparison in one line, bugs one line each, what was not run, what changed, requirements without a case, transactions the function does not offer, half-built functions, group conventions added or changed.
 
 ## Reviewer comments on a delivered workbook
 

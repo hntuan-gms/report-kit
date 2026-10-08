@@ -49,6 +49,10 @@ inputs:
     columns: {jira: "Jira", ticket: "Ticket", name: "Name", pic: "PIC", system: "System",
               menu: "Menu"}                     # menu path "A >> B >> C": where the code trace starts
     # ticket: {column: testcase, regex: "^(AI-\\d+)_"}   # when the ticket is only part of another column
+  # transactions:                               # what each function must offer, one row per user action (coverage gate)
+  #   sheet: "Transactions"                     # in the function list file; joined on function_list.columns.stt
+  #   system: "Main"                            # when the sheet lists only one system's functions
+  #   columns: {stt: "No", text: "Description", kind: "Type"}
   standard: {glob: "**/*standard*.docx", summary: rules/standard.md}
   previous_workbooks: "*{code_nodash}*.xlsx"
 

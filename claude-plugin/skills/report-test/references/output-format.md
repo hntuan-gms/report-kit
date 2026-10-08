@@ -76,6 +76,7 @@ The first that applies:
 |---|---|
 | The Quy chuẩn covers it | `Căn cứ: Quy chuẩn chung TC-TK mục II.5.1` |
 | A group convention settles it (decided acting as BA) | `Căn cứ: Quy ước kiểm thử nhóm 1D.I mục Q2`. Also add the line "Điểm Quy chuẩn chung không quy định: theo Quy ước kiểm thử nhóm 1D.I (người kiểm thử đặt thay BA, chờ BA rà lại)" to the precondition row. `rt build` checks both. |
+| A transaction of the function (whether the action exists, which roles use it) | `Căn cứ: Danh sách chức năng, yêu cầu "xem tổng hợp báo cáo giao dịch"`: the action as `brief.md` prints it, without the roles. |
 | The system contradicts itself | `Căn cứ: lưới và file Excel phải thống nhất` / `Căn cứ: trường bắt buộc phải có dấu (*)` |
 | Plain correctness | `Căn cứ: ràng buộc dữ liệu - số kiểm toán viên không thể âm` / `Căn cứ: "Đến ngày" gồm cả ngày cuối` |
 | Runtime error | `Căn cứ: chức năng phải chạy không lỗi` |
@@ -104,6 +105,21 @@ wb.tc("Kiểm tra dòng TỔNG ĐIỂM 4 NHÓM trên màn hình chi tiết",
           "Ví dụ: FLC AMD kỳ 09/2026: 4 nhóm cộng lại là −3,5 nhưng dòng TỔNG ĐIỂM 4 NHÓM hiện 0. Đúng ra là 96,5.",
           "Cũng sai: Cà phê Phước An kỳ 05/2026: nhóm 1 bị trừ 0,35 nhưng TỔNG ĐIỂM vẫn là 100.",
           "Nguyên nhân: dòng tổng lấy điểm đã lưu từ trước, không tính lại từ các nhóm."])
+```
+
+### Example: a transaction the function does not offer
+
+One F case per missing action (SKILL.md "Transactions"). The two sources are the screenshot of the screen and the code search.
+The wording below illustrates the shape only; it is not a verified finding on 1E_117.
+```python
+wb.tc("Kiểm tra trang tổng hợp có thống kê báo cáo giao dịch",
+      ["Đăng nhập bằng tài khoản chuyên viên giám sát", "Vào Trang chủ", "Tìm phần thống kê báo cáo giao dịch"],
+      ["Có phần thống kê báo cáo giao dịch", "Hiển thị số lượng báo cáo giao dịch theo điều kiện thống kê"],
+      basis='Căn cứ: Danh sách chức năng, yêu cầu "xem tổng hợp báo cáo giao dịch"\n'
+            "Kỹ thuật: màn hình trang chủ và các API dashboard không có phần nào cho báo cáo giao dịch",
+      status="F", actual=["Sai.", "Không có chức năng xem tổng hợp báo cáo giao dịch.",
+                          "Phạm vi: Trang chủ chỉ có 3 biểu đồ (Xu hướng vi phạm, Số lượng theo loại tin, Cơ cấu tỷ lệ loại tin)."],
+      covers=["T4"])
 ```
 
 A whole-report comparison case gives the scope, then one line per kind of error with its count, and leaves the detail to the case of that error:
@@ -138,7 +154,7 @@ wb = W.Workbook(prof, ws, name="Trang tổng hợp CBTT nội bộ", screen="[# 
 wb.chapter("Chức năng 1: ..."); wb.pre("1. Đăng nhập ...\n2. Menu >> ...")
 wb.cat("Giao diện"); wb.sub("Giao diện chung")
 wb.tc(purpose, [steps], [expected], basis="Căn cứ: ...", status="P", actual=["Đạt.", "Ví dụ: ..."],
-      covers=["R3", "trap:lang_twins", "area:bo_loc"])     # requirement ids this case covers
+      covers=["T1", "R3", "trap:lang_twins", "area:bo_loc"])     # requirement ids this case covers
 ...
 wb.waive("area:xss", "Màn hình không có ô nhập chữ nào")    # a requirement with no case, and why (goes to the hand-off)
 wb.finish(run_date="dd/mm/yyyy", run_note="Thời gian: ...\nNgười thực hiện: ...\nBản build: ...")
@@ -148,7 +164,7 @@ Always write cells through `tc()`: text starting with "=" is kept as text there.
 
 **Coverage gate.** `save()` writes no file while a requirement has neither a case (`covers=`) nor a reason (`waive()`), or while
 `covers` / `waive` names an id that does not exist (typo). Requirements: the `R<n>` rule lines of `analysis.md`, the
-`[FOUND]` traps of `probe.md` (`trap:<name>`), and the checklist areas (`area:<key>`, list in `test-areas.md`; a profile can
+transactions `T<n>` (`inputs/transactions.json`, written by `rt start`), the `[FOUND]` traps of `probe.md` (`trap:<name>`), and the checklist areas (`area:<key>`, list in `test-areas.md`; a profile can
 replace it with `workbook.coverage.areas`). Each save writes `<workspace>/coverage.md`: requirement -> case ids or reason.
 Run `rt build <code> --check` until it passes (it builds `<workspace>/_check.xlsx`, uses up no version), then `rt build <code>`.
 An older `build_workbook.py` that calls `wb.sheet_*` or `reportkit.evidence` no longer runs: delete those calls.
@@ -162,3 +178,4 @@ An older `build_workbook.py` that calls `wb.sheet_*` or `reportkit.evidence` no 
 - The bugs, one line each with one concrete example.
 - What could not be run and why; what changed since the previous version.
 - Rules from `analysis.md` or FOUND traps with no case, and the half-built functions found in the code (no case written for them).
+- Transactions: the ones the function does not offer (their F cases), the ones waived and why, and for a function marked "Sửa" / "Bổ sung", which `T` the previous version did not cover.
