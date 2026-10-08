@@ -16,6 +16,7 @@ Statuses describe the measurement only. Claude decides P / F / PE from the rules
 Output: <workspace>/runs/<run id>/<id>.json, summary.json, summary.md (short, for Claude).
 Re-run only what broke: `--only D01,U03`, or `--redo` (every NM / ERR of the latest run). The other
 entries are carried over from the latest run, so the summary always covers everything.
+`rt summary <code> --only D01,U03` / `--status DIFF,NM` prints just those blocks of the latest summary.md.
 """
 import datetime as _dt
 import json
@@ -147,6 +148,27 @@ def _counts(results):
 def _clip(v, n=400):
     s = json.dumps(v, ensure_ascii=False, default=str)
     return s if len(s) <= n else s[:n] + " …(%d chars, full text in the .json)" % len(s)
+
+
+def pick_blocks(text, ids=None, statuses=None):
+    """The header lines of summary.md plus only the entry blocks asked for (by id or by status)."""
+    ids = {i.strip() for i in ids or [] if i.strip()}
+    statuses = {x.strip().upper() for x in statuses or [] if x.strip()}
+    head, blocks, cur = [], [], None
+    for line in text.splitlines():
+        if line.startswith("## "):
+            cur = [line]; blocks.append(cur)
+        elif cur is None:
+            head.append(line)
+        else:
+            cur.append(line)
+    keep = []
+    for b in blocks:
+        parts = b[0][3:].split(None, 2)
+        bid, st = parts[0], (parts[1].strip("[]") if len(parts) > 1 else "")
+        if (not ids and not statuses) or bid in ids or st in statuses:
+            keep.append(b)
+    return "\n".join(head + [l for b in keep for l in b]).rstrip() + "\n", len(keep)
 
 
 def summary_md(summary, results, max_mismatch=12):

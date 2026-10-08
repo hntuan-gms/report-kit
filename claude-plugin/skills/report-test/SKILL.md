@@ -1,12 +1,12 @@
 ---
 name: report-test
 description: Write and run the test case workbook for one report / Tra cứu / Thống kê / dashboard screen, end to end, from its code (e.g. 1E_117, 2E_50). Use when asked to test a report code, run its test cases on the deployed environment, or process a Tester's commented workbook. The `rt` tool finds the screen's code from the function list's menu path, observes the screen and compares the data with independent SQL; Claude reads the code, judges every result against the project standard (Quy chuẩn chung) and the system's own rules, and the workbook is produced in the project's template.
-argument-hint: <report code> [e.g. 1E_117]
+argument-hint: <report code> [more codes] [e.g. 1E_117, or 1D_110 1D_111 for a batch]
 ---
 
 # /report-test <code>: one report, from inputs to workbook
 
-Arguments: `$ARGUMENTS` (the report code; anything else is a note from the user).
+Arguments: `$ARGUMENTS` (the report code, or several codes for a batch: see "Several reports in one request"; anything else is a note from the user).
 
 **How the work is split:**
 - `rt` (the reportkit CLI) does the mechanical work: find the function row, trace the code from the menu, log in, probe data, run the observation and comparison steps, build the workbook.
@@ -81,10 +81,38 @@ Never renumber or reuse a Q id. To change a decision, edit its row and add the d
   - the basis line uses the wording in `references/output-format.md` ("Căn cứ").
 - **Independent expectations.** Expected data comes from SQL you write from the rule stated in plain words (`analysis.md`) and the Quy chuẩn, never by copying the report's own query or view. That is how a wrong join, a midnight upper bound or a missing status filter shows up.
 - **Credentials** live only in `~/.report-kit/secrets.yaml` (or `RK_*` env vars). Never write them in the repo, the workbook or chat.
-- **Save tokens.**
-  - Read `brief.md`, `probe.md` and `runs/<id>/summary.md`, not the raw JSON.
-  - Open a screenshot when a verdict depends on it.
-  - Open only the code files the trace points to, then follow references from there.
+- **Save tokens**: follow "Token economy" below. It changes how you work, never what the workbook says.
+
+## Token economy (binding)
+
+Measured on 1B_40, 1D_104, 1D_107 and 1D_113 (`tools/token_usage.py` in the report-kit repo): 110-150 turns per report, and the context grows from about 50k to 400k tokens, so each turn re-reads up to 400k. That came to 28-43M cache-read tokens per report. The cost is **turns × context**: keep both small. Nothing here relaxes a rule above, a gate of `rt build`, or the content of a case.
+
+- **Split the heavy phases into subagents.** Use general-purpose agents in the foreground. Each one reads this SKILL.md and works through files in the workspace. The main session keeps the judging (step 8), the workbook (step 9) and every question to the user.
+  - *Trace agent* (step 3). Give it `brief.md`, the group file and the rules it needs. It follows the code chain and writes `analysis.md` exactly as step 3 says (R-ids, `file:line`, Quy chuẩn section, half-built functions). It returns at most 40 lines: the R list, the rules that already look wrong, and the half-built functions. Then you read `analysis.md` once, in full: you are responsible for it. Open a code file yourself only to settle a doubt, and only the lines in question.
+  - *Measure agent* (step 7). Give it `analysis.md`, `probe.md`, `references/checks-guide.md` and what each case needs measured. It writes `checks.yaml` (starting from the newest sibling's `gen_checks.py` / `checks.yaml`, if any), runs `rt check`, and fixes every NM / ERR that comes from the measurement with `rt check --redo` until none is left. It returns the run id and the entries still NM / ERR with the reason. Then you read `summary.md` once.
+  - State the terms the user approved (account, SELECT, demo / UAT) in the agent's prompt: an agent cannot ask. An agent that stops halfway is resumed with SendMessage, not respawned. Ask the same agent for a later re-measure instead of doing it yourself.
+- **Small tool output.**
+  - Never `cat` a whole code file, reference file or sibling workspace file. Grep `-n` for the place, then Read with offset / limit (≤ 80 lines).
+  - From a sibling's `analysis.md`, grep the `R\d+\.` lines.
+  - Use a small `rt sql --limit`. Select only the columns you need. Count with `COUNT(*)` / `GROUP BY` instead of listing rows.
+  - After a partial re-run, read only what changed: `rt summary <code> --only U03,D05` or `--status DIFF,NM,ERR`.
+  - Don't re-read a file you have just written or a workbook you have just built: `rt build` prints the counts and the gates.
+- **Read each reference once, at its step.** The standard, the group file, `environment.md` and `lessons.md` at step 2. `checks-guide.md` at step 7 (or only the measure agent reads it). `output-format.md` and `test-areas.md` at step 9. After that, grep them by keyword.
+- **Reuse the newest sibling.** When `brief.md` lists a sibling, or a report of the same group has a delivered workbook, copy its `gen_checks.py` / `build_workbook.py` as the skeleton and adapt it. The wording then stays consistent within the group. Never copy its verdicts: every case is judged on this report's own run.
+- **Cap rework.**
+  - Run `rt build --check`, fix *every* line the gate lists in one pass, then rebuild.
+  - Fix scripts with Edit; don't rewrite them.
+  - Don't re-run a probe or a check entry that already has a valid result: use `--only`.
+  - Put several independent commands in one call when none needs the other's output.
+- **Screenshots**: open one only when a verdict depends on what the picture shows (layout, truncation, zoom). An image stays in the context for every later turn.
+
+### Several reports in one request (`/report-test 1D_110 1D_111 ...`)
+1. Run `rt doctor` and `rt login` once. Read the standard, the group files, `environment.md` and `lessons.md` once.
+2. Do `rt start` for each code, and list the siblings and shared code files from the briefs.
+3. Ask step 4 **once for the whole batch**: account per report, SELECT, demo / UAT, unknown tickets.
+4. Run the reports **one after another**, never in parallel (one browser session, one account). For each report, spawn one general-purpose agent that runs steps 3-9 of this skill for that code. Reports that share one screen (siblings) go to the same agent, so the shared code is read once. Give it the approved terms, the group decisions already taken in this batch, and the newest sibling workspace to start from.
+5. The agent returns the hand-off message (step 10) in at most 40 lines. Group convention items it added are written in the group file, as usual.
+6. Your final message combines the hand-offs: one block per report.
 
 ## The run
 
@@ -128,7 +156,7 @@ Do the steps in order and don't skip one. Each step leaves files in the workspac
        **Start each rule line with its id: `R1. ...`, `R2. ...`.** The ids are the requirements the coverage gate of `rt build` checks;
      - for each rule, the Quy chuẩn section it falls under, and whether it already looks wrong by 1-4 above;
      - functions that are half built (code present but not wired), for the hand-off message.
-   - For a large report, delegate the tracing to an Explore agent and keep only its conclusions.
+   - Delegate the tracing to the trace agent ("Token economy") and keep only its conclusions and `analysis.md`.
 
 4. **Ask the user once**, in a single question, before touching the environment:
    - which account to use: a super admin can't reproduce data-permission cases. With a sibling report, ask for the account type that makes this one different (e.g. a public-company login);
@@ -155,7 +183,7 @@ Do the steps in order and don't skip one. Each step leaves files in the workspac
      - steps and observations for what the cases need: titles, labels, dropdown values, tooltips, requests fired, toasts, downloads, zoom, Tab order, English mode, a simulated 500;
      - add `ready` / `require` preconditions so a bad measurement shows as NM instead of misleading you.
    - Read `runs/<id>/summary.md`:
-     - **NM / ERR** means the measurement failed, not the app. Fix the entry and re-run only those with `rt check <code> --redo` (or `--only U03,U05`);
+     - **NM / ERR** means the measurement failed, not the app. Fix the entry and re-run only those with `rt check <code> --redo` (or `--only U03,U05`), then read just those blocks with `rt summary <code> --only U03,U05`;
      - **DIFF**: trace each differing cell back to the source row with `rt sql`, and cite one concrete example (ID, value, date) per cause;
      - **OBS**: read the observations, and the screenshots where the verdict depends on the picture.
 

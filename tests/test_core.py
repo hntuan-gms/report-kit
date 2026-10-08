@@ -388,3 +388,13 @@ def test_build_check_writes_scratch_file(tmp_path, monkeypatch):
         wb.finish(run_date="07/10/2026", run_note="n")
         assert wb.save() == scratch
     assert not os.path.exists(tmp_path / "out")
+
+
+def test_summary_pick_blocks_by_id_and_status():
+    from reportkit.checks import engine
+    text = "# Run r1 - 1D_110 (ids)\nCounts: DIFF=1, MATCH=1, OBS=1\n\n## D01 [MATCH] a\ncells compared: 4, differing: 0\n\n" \
+           "## D02 [DIFF] b\n- x: DIFF\n\n## U01 [OBS] c  (carried from r0)\n- title: \"T\"\n"
+    out, n = engine.pick_blocks(text, ["U01"], ["diff"])
+    assert n == 2 and "## D02" in out and "## U01" in out and "## D01" not in out and out.startswith("# Run r1")
+    out, n = engine.pick_blocks(text, [""], [""])
+    assert n == 3

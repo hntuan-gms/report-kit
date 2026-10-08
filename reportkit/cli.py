@@ -6,6 +6,7 @@
   rt login [--system S]        log in through the real SSO page, save the session
   rt probe <code> [--tables]   run the profile's data traps on the report's tables -> probe.md
   rt check <code> [--only ids] [--redo] [--kind data|ui]    run checks.yaml -> runs/<id>/summary.md
+  rt summary <code> [--only ids] [--status DIFF,NM]  print only those entries of the latest run's summary.md
   rt build <code> [--check]    run the workspace's build_workbook.py, then the quality gate (coverage, results, hidden rows,
                                wording); --check builds <workspace>/_check.xlsx only, so a failing gate costs no version
   rt status <code>             what is done, what is next
@@ -201,6 +202,18 @@ def cmd_check(a):
             _out(f.read())
 
 
+def cmd_summary(a):
+    from .checks import engine
+    prof = P.load(a.profile); ws = prof.workspace(a.code)
+    rd = os.path.join(ws.runs_dir(), a.run) if a.run else ws.latest_run()
+    path = os.path.join(rd, "summary.md") if rd else None
+    if not path or not os.path.exists(path):
+        raise SystemExit("No summary.md yet for %s: run rt check first." % a.code)
+    with open(path, encoding="utf-8") as f:
+        text, n = engine.pick_blocks(f.read(), (a.only or "").split(","), (a.status or "").split(","))
+    _out(text + "(%d entries, from %s)" % (n, path))
+
+
 def cmd_build(a):
     from . import workbook
     prof = P.load(a.profile); ws = prof.workspace(a.code)
@@ -323,6 +336,8 @@ def main(argv=None):
     x = sp.add_parser("probe"); x.add_argument("code"); x.add_argument("--tables"); x.add_argument("--schema", default="default"); x.set_defaults(f=cmd_probe)
     x = sp.add_parser("check"); x.add_argument("code"); x.add_argument("--only"); x.add_argument("--redo", action="store_true")
     x.add_argument("--kind", choices=["data", "ui"]); x.add_argument("--label"); x.add_argument("--print", action="store_true"); x.set_defaults(f=cmd_check)
+    x = sp.add_parser("summary"); x.add_argument("code"); x.add_argument("--only", help="entry ids, e.g. D01,U03")
+    x.add_argument("--status", help="entry statuses, e.g. DIFF,NM,ERR"); x.add_argument("--run", help="run id (default: latest)"); x.set_defaults(f=cmd_summary)
     x = sp.add_parser("build"); x.add_argument("code")
     x.add_argument("--check", action="store_true", help="build <workspace>/_check.xlsx and run the gates; no version used up"); x.set_defaults(f=cmd_build)
     x = sp.add_parser("status"); x.add_argument("code"); x.set_defaults(f=cmd_status)

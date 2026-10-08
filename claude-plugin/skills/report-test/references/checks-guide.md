@@ -3,7 +3,7 @@
 `checks.yaml` lives in the report workspace. It describes **what to measure**, never what the right
 answer is: the kit records, Claude judges. Each entry runs on its own (a fresh browser page per UI entry),
 so one broken entry never spoils the others, and you re-run only what broke with `rt check <code> --redo`
-or `--only <ids>`.
+or `--only <ids>`, then read just those blocks with `rt summary <code> --only <ids>` (or `--status DIFF,NM,ERR`).
 
 ```yaml
 system: ids                          # a system key from .report-kit/project.yaml

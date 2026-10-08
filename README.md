@@ -54,6 +54,7 @@ Có thể thay bằng biến môi trường `RK_LOGIN_USER`, `RK_LOGIN_PASSWORD`
 | `rt login` | Đăng nhập SSO thật, lưu phiên. Phiên còn hạn thì dùng lại |
 | `rt probe <mã>` | Chạy bộ bẫy dữ liệu trên các bảng của báo cáo → `probe.md` |
 | `rt check <mã> [--only D01,U03] [--redo]` | Chạy `checks.yaml`. Mỗi mục chạy riêng; `--redo` chạy lại các mục NM / ERR |
+| `rt summary <mã> [--only D01,U03] [--status DIFF,NM]` | In riêng các mục đó của `summary.md` lần chạy mới nhất (đỡ đọc lại cả file) |
 | `rt build <mã>` | Chạy `build_workbook.py` của workspace và kiểm chất lượng sheet test case: kết quả cụ thể, không dòng ẩn, câu chữ dễ đọc cho Tester / BA |
 | `rt status <mã>` | Bước nào xong, bước nào tiếp theo (tiếp tục khi phiên bị ngắt) |
 | `rt sql "<SELECT>"`, `rt api GET /path` | Tra nhanh (chỉ SELECT; chỉ gọi endpoint đã xác nhận là chỉ đọc) |
