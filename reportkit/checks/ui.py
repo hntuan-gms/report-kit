@@ -7,6 +7,7 @@ and judges them against the report's rules / standard (the kit only records what
     lang: vi                            # optional; en switches with the profile's ui.lang selectors
     routes:                             # optional network stubs, only for this check
       - {pattern: "**/monthly-summary**", status: 500, body: '{"message":"Simulated"}'}
+    pre_steps: false                    # optional: skip the profile's ui.pre_steps for this check (default: they run)
     ready: {selector: "apx-chart svg", min: 4, timeout: 20000}     # precondition, else NM
     steps:
       - hover: {selector: ".apexcharts-pie-area", nth: 0}
@@ -32,6 +33,11 @@ and judges them against the report's rules / standard (the kit only records what
     require: {tip: {regex: "^Hạng A"}}  # preconditions on observations, else NM
 
 Observation kinds: text, texts, count, attr {selector, name}, value, js, requests, toasts, url.
+
+Profile `ui.pre_steps` (project.yaml) is a list of steps run right after the page has loaded and settled, again once `ready`
+holds (after ui.pre_steps_wait_ms, default 2000: such dialogs often start only after the data has loaded), and after every
+`goto` / `reload` step. Use it for what appears on every first visit and blocks the clicks that follow: an onboarding
+tour, a cookie banner, a "what's new" dialog. Errors in pre_steps are ignored (the thing may not show every time).
 """
 import os
 import re
@@ -145,7 +151,7 @@ def _step(pg, step, st, shots):
         loc.select_option(label=str(arg["label"])) if "label" in arg else loc.select_option(value=str(arg["value"]))
         pg.wait_for_timeout(arg.get("settle_ms", 3000))
     elif kind == "fill":
-        _loc(pg, arg).fill(str(arg["text"]))
+        _loc(pg, arg).fill(str(arg["text"] if "text" in arg else arg.get("value", "")))
     elif kind == "press":
         pg.keyboard.press(arg); pg.wait_for_timeout(1500)
     elif kind == "wait":
@@ -171,9 +177,9 @@ def _step(pg, step, st, shots):
             pg.reload(wait_until="load", timeout=30000)
         except Exception as e:
             st["obs"].setdefault("errors", []).append("reload: " + str(e).splitlines()[0][:150])
-        pg.wait_for_timeout(st["settle_ms"])
+        pg.wait_for_timeout(st["settle_ms"]); _pre(pg, st, shots)
     elif kind == "goto":
-        pg.goto(st["web"] + arg, wait_until="load"); pg.wait_for_timeout(st["settle_ms"])
+        pg.goto(st["web"] + arg, wait_until="load"); pg.wait_for_timeout(st["settle_ms"]); _pre(pg, st, shots)
     elif kind == "expect_download":
         name = arg.get("as", "download"); n0 = len(st["calls"])
         try:
@@ -194,6 +200,15 @@ def _step(pg, step, st, shots):
         raise ValueError("unknown step '%s'" % kind)
 
 
+def _pre(pg, st, shots):
+    """The profile's ui.pre_steps (tour / banner dismissal), unless the check sets `pre_steps: false`."""
+    for s in st.get("pre_steps") or []:
+        try:
+            _step(pg, s, dict(st, pre_steps=None), shots)
+        except Exception:
+            pass
+
+
 def run(profile, system, check, browser, run_dir):
     """Runs one UI check in a fresh context. Returns {status: OBS|NM|ERR, observations, ...}."""
     from .assertions import check_all
@@ -206,7 +221,8 @@ def run(profile, system, check, browser, run_dir):
                               storage_state=state if os.path.exists(state) else None, accept_downloads=True)
     pg = ctx.new_page()
     st = {"profile": profile, "calls": [], "obs": {}, "ctx": ctx, "id": check["id"], "web": web,
-          "settle_ms": int(check.get("settle_ms", profile.get("ui.settle_ms", 6000)))}
+          "settle_ms": int(check.get("settle_ms", profile.get("ui.settle_ms", 6000))),
+          "pre_steps": None if check.get("pre_steps") is False else (profile.get("ui.pre_steps") or [])}
     pg.on("response", lambda r: st["calls"].append([r.request.method, re.sub(r"^.*?/api/v\d+", "", r.url)[:140], r.status])
           if api_marker in r.url else None)
     res = {"id": check["id"]}
@@ -215,6 +231,7 @@ def run(profile, system, check, browser, run_dir):
             _route(pg, r)
         pg.goto(web + check.get("page", "/"), wait_until="load", timeout=60000)
         pg.wait_for_timeout(st["settle_ms"])
+        _pre(pg, st, shots)
         if check.get("lang") == "en":
             _set_lang(pg, profile, "en")
         ready = check.get("ready")
@@ -232,6 +249,8 @@ def run(profile, system, check, browser, run_dir):
                 res.update(status="NM", reason="page not ready: %d x '%s' (need %d)" % (n, ready["selector"], ready.get("min", 1)),
                            observations=st["obs"], screenshot=p)
                 return res
+        if st["pre_steps"]:                      # the tour / banner often starts only after the data has loaded
+            pg.wait_for_timeout(int(profile.get("ui.pre_steps_wait_ms", 2000))); _pre(pg, st, shots)
         for s in check.get("steps", []) or []:
             _step(pg, s, st, shots)
         for name, spec in (check.get("observe") or {}).items():

@@ -2,11 +2,17 @@
 
   rt init                      create .report-kit/ (profile skeleton) in the current project
   rt doctor [--db]             check Python packages, browser, profile, secrets, web reachability (DB only with --db)
+  rt batch <code> <code> ...   SEVERAL codes in one request: rt start for each, group the ones on the same screen,
+                               write the plan (<work_root>/_batch/<id>.md); a trailing note is kept as the user's instructions
+                               [--join A:B]  force code A into B's screen group (a popup / tab of that screen)
   rt start <code> [--route R]  find the function and its transactions, dump standard / previous workbook, trace the code
                                from the menu -> brief.md
   rt login [--system S]        log in through the real SSO page, save the session
   rt probe <code> [--tables]   run the profile's data traps on the report's tables -> probe.md
-  rt check <code> [--only ids] [--redo] [--kind data|ui]    run checks.yaml -> runs/<id>/summary.md
+  rt check <code> [--only ids] [--redo] [--pending] [--kind data|ui]    run checks.yaml -> runs/<id>/summary.md
+                               --pending: run every entry that has no result yet (+ NM / ERR), e.g. after a stopped batch
+  rt show <code> <ids|all> [--limit N] [--keys a,b]   compact read of results (merged across runs, noise requests hidden)
+  rt scaffold <code> [--like CODE] [--force]   write measure_<code>.py, gen_checks.py, build_workbook.py skeletons
   rt build <code> [--check]    run the workspace's build_workbook.py, then the quality gate (coverage, results, hidden rows,
                                wording); --check builds <workspace>/_check.xlsx only, so a failing gate costs no version
   rt status <code>             what is done, what is next
@@ -29,6 +35,13 @@ from . import profile as P
 
 def _out(s):
     print(s); sys.stdout.flush()
+
+
+def _unmsys(path):
+    """Git Bash (MSYS) turns an argument that starts with "/" into "C:/Program Files/Git/...": undo it."""
+    import re
+    m = re.match(r"^[A-Za-z]:[\\/].*?[\\/]Git[\\/](.*)$", path or "")
+    return "/" + m.group(1).replace("\\", "/") if m else path
 
 
 # ------------------------------------------------------------------ init / doctor
@@ -161,11 +174,11 @@ def cmd_start(a):
                 L.append("- roles named: %s (step 4: an account of each kind that the cases need)" % ", ".join(roles))
     sibs =inputs.find_siblings(prof, code, fn, trace=t, workspaces_root=os.path.dirname(ws.dir))
     if sibs:
-        L += ["", "## Sibling reports - SAME SCREEN OR SAME CODE: test the difference, don't copy",
+        L += ["", "## Sibling reports - SAME SCREEN OR SAME CODE: measure once, write your own workbook",
               "These functions share this one's screen or its main code files, so they are probably the same screen for another",
               "kind of user or another filter. Before writing a case, find out what differs (account type, data scope, filter) and",
-              "ask for the account / data that shows it. Shared behaviour: cite the sibling's case instead of copying it, unless",
-              "it is re-run with what makes this report different.", ""]
+              "ask for the account / data that shows it. Measure the shared screen once (host workspace, `rt batch`), but write this",
+              "code's workbook as its own full set of cases: never cite another workbook, rebuild the shared cases as yours.", ""]
         for s in sibs:
             L.append("- **%s** %s - %s%s%s" % (s["code"], s["name"] or "", "; ".join(s["why"]),
                                                ("; workspace %s" % s["workspace"]) if s["workspace"] else "",
@@ -216,7 +229,8 @@ def cmd_check(a):
     spec = engine.load(ws)
     auth.ensure(prof, spec.get("system") or next(iter(prof.systems)))
     kinds = (a.kind,) if a.kind else ("data", "ui")
-    rd, summary = engine.run(prof, ws, only=a.only.split(",") if a.only else None, redo=a.redo, kinds=kinds, label=a.label)
+    rd, summary = engine.run(prof, ws, only=a.only.split(",") if a.only else None, redo=a.redo, kinds=kinds, label=a.label,
+                             pending=a.pending)
     counts = {}
     for c in summary["checks"]:
         counts[c["status"]] = counts.get(c["status"], 0) + 1
@@ -306,10 +320,94 @@ def cmd_sql(a):
 def cmd_api(a):
     from . import http
     prof = P.load(a.profile)
-    sc, body = http.json_call(prof, a.system or next(iter(prof.systems)), a.method, a.path,
+    sc, body = http.json_call(prof, a.system or next(iter(prof.systems)), a.method, _unmsys(a.path),
                               json.loads(a.params) if a.params else None, json.loads(a.body) if a.body else None)
     s = json.dumps(body, ensure_ascii=False, default=str)
     _out("%s %s" % (sc, s if len(s) <= a.max else s[: a.max] + " …(%d chars)" % len(s)))
+
+
+# ------------------------------------------------------------------ batch / show / scaffold
+def cmd_batch(a):
+    """Several codes: rt start each (quietly), group by screen, write the plan."""
+    import contextlib
+    import datetime as _dt
+    from . import batch, inputs
+    prof = P.load(a.profile)
+    codes, note = batch.parse_codes(a.codes)
+    if not codes:
+        raise SystemExit("No report code found in: %s" % " ".join(a.codes))
+    traces, info = {}, {}
+    for c in codes:
+        ws = prof.workspace(c)
+        if not a.no_start or not os.path.exists(ws.p("brief.md")):
+            args = argparse.Namespace(code=c, profile=a.profile, retrace=False, route=None)
+            buf = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(buf):
+                    cmd_start(args)
+            except SystemExit as e:
+                _out("%s: rt start failed: %s" % (c, e))
+                traces[c] = None
+                info[c] = {"ws": ws.dir, "name": None, "method": "start failed"}
+                continue
+        tp = ws.p("trace.json")
+        traces[c] = json.load(open(tp, encoding="utf-8")) if os.path.exists(tp) else None
+        fp = ws.p("inputs", "function.json")
+        fn = json.load(open(fp, encoding="utf-8")) if os.path.exists(fp) else {}
+        gkey = inputs.group_key(fn)
+        gfile = inputs.group_conventions(prof, gkey) if gkey else None
+        info[c] = {"ws": ws.dir, "name": fn.get("name"), "method": (traces[c] or {}).get("method"), "group_key": gkey,
+                   "group_file": gfile, "group_file_exists": bool(gfile and os.path.exists(gfile)), "system": fn.get("system_key")}
+    joins = [tuple(x.split(":", 1)) for x in (a.join or []) if ":" in x]
+    groups = batch.group_by_screen(traces, joins)
+    bid = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    md = batch.plan_md(bid, note or a.note, groups, info)
+    for g in groups:
+        for c in g["codes"]:
+            prof.workspace(c).mark("batch", id=bid, group=g["codes"], host=g["host"])
+    path = batch.save(prof.work_root, bid, {"codes": codes, "note": note, "groups": groups, "info": info}, md)
+    _out(md)
+    _out("\nplan written: %s" % path)
+
+
+def cmd_show(a):
+    from . import results
+    prof = P.load(a.profile)
+    ws = prof.workspace(a.code)
+    noise = prof.get("ui.noise_requests") or None
+    ids = results.all_ids(ws) if a.ids == ["all"] else [i for x in a.ids for i in x.split(",") if i]
+    _out(results.show(ws, ids, limit=a.limit, noise=noise, keys=a.keys.split(",") if a.keys else None))
+
+
+def cmd_scaffold(a):
+    from . import inputs
+    prof = P.load(a.profile)
+    code = P.norm_code(a.code)
+    ws = prof.workspace(code)
+    fp = ws.p("inputs", "function.json")
+    fn = json.load(open(fp, encoding="utf-8")) if os.path.exists(fp) else {}
+    gkey = inputs.group_key(fn) if fn else None
+    tpl = os.path.join(os.path.dirname(__file__), "assets", "scaffold")
+    subs = {"{code}": code, "{system}": fn.get("system_key") or next(iter(prof.systems)),
+            "{name}": (fn.get("name") or code).replace('"', "'"), "{group_repr}": repr(gkey)}
+    targets = [("measure.py.tpl", "measure_%s.py" % code), ("gen_checks.py.tpl", "gen_checks.py"), ("build_workbook.py.tpl", "build_workbook.py")]
+    for src, dst in targets:
+        out = ws.p(dst)
+        if os.path.exists(out) and not a.force:
+            _out("kept   %s (exists; --force to overwrite)" % out)
+            continue
+        if a.like and dst != "measure_%s.py" % code:
+            like = prof.workspace(a.like).p(dst)
+            if os.path.exists(like):
+                text = open(like, encoding="utf-8").read().replace(P.norm_code(a.like), code)
+                open(out, "w", encoding="utf-8").write(text)
+                _out("copied %s <- %s (edit every case: the sibling's numbers are not yours)" % (out, like))
+                continue
+        text = open(os.path.join(tpl, src), encoding="utf-8").read()
+        for k, v in subs.items():
+            text = text.replace(k, v)
+        open(out, "w", encoding="utf-8").write(text)
+        _out("wrote  %s" % out)
 
 
 def cmd_dump(a):
@@ -342,11 +440,29 @@ def main(argv=None):
     sp = ap.add_subparsers(dest="cmd", required=True)
     x = sp.add_parser("init"); x.add_argument("--name"); x.set_defaults(f=cmd_init)
     x = sp.add_parser("doctor"); x.add_argument("--db", action="store_true", help="also connect to the DB (needs the user's OK)"); x.set_defaults(f=cmd_doctor)
+    x = sp.add_parser("batch")
+    x.add_argument("codes", nargs="+", help="codes, then the user's note (anything after the last code)")
+    x.add_argument("--join", action="append", help="A:B put code A in B's screen group (popup / tab of that screen)")
+    x.add_argument("--no-start", action="store_true", help="reuse existing workspaces, do not run rt start again")
+    x.add_argument("--note", default="")
+    x.set_defaults(f=cmd_batch)
+    x = sp.add_parser("show")
+    x.add_argument("code")
+    x.add_argument("ids", nargs="+", help="entry ids (comma list) or 'all'")
+    x.add_argument("--limit", type=int, default=700)
+    x.add_argument("--keys")
+    x.set_defaults(f=cmd_show)
+    x = sp.add_parser("scaffold")
+    x.add_argument("code")
+    x.add_argument("--like")
+    x.add_argument("--force", action="store_true")
+    x.set_defaults(f=cmd_scaffold)
     x = sp.add_parser("start"); x.add_argument("code"); x.add_argument("--retrace", action="store_true")
     x.add_argument("--route", help="the screen's route (e.g. /statistics/x/y) when the menu path can't be matched"); x.set_defaults(f=cmd_start)
     x = sp.add_parser("login"); x.add_argument("--system", action="append"); x.add_argument("--type"); x.add_argument("--force", action="store_true"); x.set_defaults(f=cmd_login)
     x = sp.add_parser("probe"); x.add_argument("code"); x.add_argument("--tables"); x.add_argument("--schema", default="default"); x.set_defaults(f=cmd_probe)
     x = sp.add_parser("check"); x.add_argument("code"); x.add_argument("--only"); x.add_argument("--redo", action="store_true")
+    x.add_argument("--pending", action="store_true", help="run every entry without a result yet (and NM / ERR)")
     x.add_argument("--kind", choices=["data", "ui"]); x.add_argument("--label"); x.add_argument("--print", action="store_true"); x.set_defaults(f=cmd_check)
     x = sp.add_parser("build"); x.add_argument("code")
     x.add_argument("--check", action="store_true", help="build <workspace>/_check.xlsx and run the gates; no version used up"); x.set_defaults(f=cmd_build)

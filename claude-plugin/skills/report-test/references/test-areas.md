@@ -160,3 +160,16 @@ must be blocked or store exactly the typed value.
   to a screen with real data instead of a "not found" page. An F needs two sources (observation + screenshot/response).
 - **Không áp dụng / Chưa thực hiện / Không đo được:** state the reason (no such function, shared SSO, blocked by
   required fields).
+
+## Added from the batch runs (cover these on every list screen and on every tab / popup of a detail page)
+
+- **Paging:** distinct rows across pages at several page sizes; row numbers continue on page 2; a parent with more rows than one page.
+- **Sort:** each sortable column ascending and descending: case-insensitive on the shown value, blanks last in both directions, the column sorts what it shows (a status label, not its code), the order is deterministic.
+- **Text filters:** case, accents, `%` and `_` as plain characters, leading / trailing spaces, a value that matches nothing, injection strings.
+- **Year / period filters:** every year the dropdown offers, against the rule written in plain words (valid in the year, issued in the year...).
+- **Export:** same rows and values as the grid for the same filters, the same columns as the grid, number and date formats of the cells, the empty export (headers only, no template placeholders), the file name.
+- **English mode on popups, tabs and history lists:** no raw i18n keys, labels translated, data (names, free text) unchanged, account-type text translated.
+- **Server error and offline:** a visible message, not an empty list that reads as "no data".
+- **Detail by id outside the permission scope:** the detail, its tabs and history must refuse, like the list does.
+- **Duplicates and soft-deleted rows** in each list; deleted rows never shown or counted.
+- **Write forms (open and cancel only):** required marks against validation, defaults, date-order rule (equal dates), the confirmation when closing with typed data, the confirmation of delete; saving is "Chưa thực hiện" on a shared environment.

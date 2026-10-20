@@ -2,8 +2,8 @@
 
 `checks.yaml` lives in the report workspace. It describes **what to measure**, never what the right
 answer is: the kit records, Claude judges. Each entry runs on its own (a fresh browser page per UI entry),
-so one broken entry never spoils the others, and you re-run only what broke with `rt check <code> --redo`
-or `--only <ids>`.
+so one broken entry never spoils the others, and you re-run only what broke with `rt check <code> --redo`,
+`--only <ids>` or `--pending` (every entry with no result yet, plus NM / ERR: finishes a stopped run and runs entries added later).
 
 ```yaml
 system: ids                          # a system key from .report-kit/project.yaml
@@ -126,3 +126,17 @@ Every UI entry starts in a fresh browser context with the saved login, and a fin
 | OBS | UI observed | read observations / screenshots, judge against the standard and the function's rules |
 | NM | not measurable (precondition failed) | fix the entry, `rt check <code> --redo` |
 | ERR | the entry itself failed (selector, HTTP, SQL) | fix the entry, `rt check <code> --redo` |
+
+## Running and reading a long batch
+
+- A UI entry takes 30-60 seconds, so 60 entries take tens of minutes. Start `rt check <code> --pending` in the background with its output in a log file and wait **once** for the log to say finished. Do not poll and do not arm a monitor per entry.
+- Read results with `rt show <code> <ids|all> [--keys a,b] [--limit N]`: it merges across runs (a run you stopped has no summary), hides noise requests (profile `ui.noise_requests`) and prints screenshots as file names.
+- `rt scaffold <code>` writes `gen_checks.py` (UI entries as Python helpers: `U()`, `obs()`, `FIELD()`, `routes`) and `measure_<code>.py` (API + SQL facts); both are skeletons to edit.
+
+## Things that bite on Angular screens
+
+- **Typing:** a plain `fill` does not always reach the Angular model. `FIELD()` in the scaffold sets the value with the native setter and fires input / change / blur. A `fill` step takes `text` (or `value`).
+- **Stubs go in the entry-level `routes:`** (installed before the page loads). A `route` step after `ready` misses the requests the page already sent and the entry then shows real data.
+- **Onboarding tours / banners** that appear on the first visit of a fresh browser context block every click (`Locator.click: Timeout`). Put the removal in the profile's `ui.pre_steps` (run after load, once `ready` holds, and after every goto / reload) instead of repeating it in every entry; `pre_steps: false` on an entry turns it off.
+- **Choices.js selects:** click `app-select >> nth=N >> .choices`, then the item; the native `<select>` is hidden.
+- **Confirmation dialogs of write actions** can be opened and cancelled safely if every write endpoint is aborted by an entry-level `routes:` item (`abort: true`); check the calls observation afterwards.

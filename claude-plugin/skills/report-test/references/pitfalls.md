@@ -35,3 +35,17 @@ Project-specific lessons live in the profile's `rules/lessons.md`. These apply e
 ## Environment
 - **Windows console:** the kit forces UTF-8 output. When running other scripts, set `PYTHONIOENCODING=utf-8`.
 - **Git Bash rewrites a leading `/`** in arguments into a Windows path. `rt` takes API paths as arguments, so run it from PowerShell, or prefix the call with `MSYS_NO_PATHCONV=1`.
+
+## Batch / shared-screen lessons (2B.I, October 2026)
+- **A sort without a tie-break key repeats and loses rows across pages.** Fetch the first pages at page sizes 10 / 25 / 50 and count distinct ids; compare with one big page. Seen on an auditor list (14 distinct created dates for 1,707 rows: 60 rows over 6 pages were 43 people) and on a block of 54 approvals.
+- **A filter parameter with a wrong name is silently ignored** and returns everything: it looks like "the filter does nothing". Take the parameter names from the screen's component (`searchFilters`), not from the entity.
+- **Detail / tab endpoints take the parent id and often skip the data-permission check** that the list and export apply. Test with ids that exist but are outside the permission scope.
+- **The permission table can hold ids of parents that no longer exist.** Scope = permission joined to the data table, not the permission row count.
+- **A server error that looks like "no data":** stub a 500 for every list the screen loads and check for a message. Silent empty lists make users think nothing exists.
+- **Raw i18n keys in English mode** (`companyDetail.form.xxx`) and untranslated suffixes are common on history / popup components; open every popup and tab in English.
+- **Number and date formats in Excel cells:** a number stored with the General format shows `8000000000`; open the cell's format, not only its value.
+- **The empty export:** some templates keep their placeholder row (`${item.name}`) when there is no data. Export once with a filter that matches nothing.
+- **Duplicates in the data are findings** (the same record twice, identical periods without a document number): group by the natural key before judging a list.
+- **Dev data moves while you work.** Re-measure just before writing a number into a case; two measurements that differ are both facts, quote the later one.
+- **A one-off failure after login** (connection toast, raw codes) is not a bug: re-run it once before judging.
+- **Sub-agents cannot Write report files and must not wait.** Use them for read-only code tracing with a 5-minute limit; never for `rt check`, polling, or anything that sleeps (the prompt cache expires while they wait).

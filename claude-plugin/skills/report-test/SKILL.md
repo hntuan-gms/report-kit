@@ -1,12 +1,13 @@
 ---
 name: report-test
-description: Write and run the test case workbook for one report / Tra cứu / Thống kê / dashboard screen, end to end, from its code (e.g. 1E_117, 2E_50). Use when asked to test a report code, run its test cases on the deployed environment, or process a Tester's commented workbook. The `rt` tool finds the screen's code from the function list's menu path, observes the screen and compares the data with independent SQL; Claude reads the code, judges every result against the project standard (Quy chuẩn chung) and the system's own rules, and the workbook is produced in the project's template.
-argument-hint: <report code> [e.g. 1E_117]
+description: Write and run the test case workbook for one report or for SEVERAL ("/report-test 2B_18, 2B_19, 2B_20") / Tra cứu / Thống kê / dashboard / management screen, end to end, from its code (e.g. 1E_117, 2E_50). With several codes it runs the batch flow by itself: group the codes that share a screen, measure each screen once, write one standalone workbook per code. Use when asked to test a report code, run its test cases on the deployed environment, or process a Tester's commented workbook. The `rt` tool finds the screen's code from the function list's menu path, observes the screen and compares the data with independent SQL; Claude reads the code, judges every result against the project standard (Quy chuẩn chung) and the system's own rules, and the workbook is produced in the project's template.
+argument-hint: <report code> [<report code> ...] [note, e.g. 1E_117 or 2B_18, 2B_19, 2B_20]
 ---
 
-# /report-test <code>: one report, from inputs to workbook
+# /report-test <code> [<code> ...]: from inputs to workbook
 
-Arguments: `$ARGUMENTS` (the report code; anything else is a note from the user).
+Arguments: `$ARGUMENTS` (one or more report codes; whatever follows the last code is a note from the user).
+**One code: follow "The run" below. Several codes: follow "Batch mode" first, it uses "The run" for every step.**
 
 **How the work is split:**
 - `rt` (the reportkit CLI) does the mechanical work: find the function row, trace the code from the menu, log in, probe data, run the observation and comparison steps, build the workbook.
@@ -16,6 +17,47 @@ The project profile is `.report-kit/` in the repo. Its `rules/` folder holds:
 - the project standard summary (the Quy chuẩn chung, for every test case);
 - `groups/<group>.md`, the conventions of each function group, which Claude decides acting as BA;
 - environment notes, lessons and data traps.
+
+## Batch mode (several codes in one request)
+
+`/report-test 2B_18, 2B_19, 2B_20, 2B_21` is the whole instruction. Everything below is standing practice: do it without being asked and do not ask the user to repeat it. A note after the codes (e.g. "share what can be shared", "no sub-agent may wait more than 5 minutes") adds to these rules and never replaces them.
+
+**The idea:** the measuring is done once per *screen*, the workbook is written once per *code*.
+
+1. **Plan: `rt batch <codes...>`.** It starts every code, groups the codes that share a screen (same route / component / top code files) and writes `<work_root>/_batch/<id>.md`.
+   - Read the plan. A code with no screen found ("name only") is probably a popup, tab or detail page of another code's screen: find where it lives (menu, routes file, the other screens' tabs and buttons), then `rt start <code> --route /...` or `rt batch ... --join <code>:<host code>`.
+   - If no screen exists for a function at all, test the nearest thing users really see, decide it as BA (group file, one Q row saying what the function is taken to be) and say so in the hand-off; do not write cases for code that is not wired to a screen.
+   - The first resolved code of a group is its **host**: the group's `checks.yaml`, measure scripts and `runs/` live in the host workspace.
+2. **Share the measuring, never the wording.** Each code's workbook is standalone: its own full set of cases (aim for what a stand-alone workbook of that screen needs, usually 40-90), built from the host's measurements. No cell may say "xem <other code>", "dùng chung", or cite another workbook. Numbers measured with this account are used only for what this code covers; a case that depends on an account or data this account cannot see is "Chưa thực hiện - cần ...". (This replaces the "cite the sibling's case" advice under "The run".)
+3. **Trace the code in parallel with sub-agents, one per screen group (or per half of a big one), under hard limits.**
+   - Brief each agent: goal, the files to start from (the brief.md trace), the output format of `analysis.md` below, and these limits: read only (no `rt`, no URL, no DB), about 30 file reads, finish within 5 minutes, never sleep or wait, return the result as text.
+   - Sub-agents cannot Write report files. **You** save one `analysis.md` per code (each code needs its own complete file with its own `R1.` lines; copy the shared rules into each).
+   - What an agent says "looks wrong" is a hypothesis. The deployed build can differ from the repo (a filter, a block, a label); measure before you judge.
+4. **Never give a sub-agent anything that waits.** `rt check` of UI entries runs 30-60 seconds each; a batch takes tens of minutes. You start it yourself in the background and wait once (below). Writing a workbook builder is your job too unless the user hands it over explicitly.
+5. **Ask the user once**, in one question: the account (and the roles the transactions name), OK for read-only SELECT, whether another team is using the environment. Everything else (business rules) you decide as BA. Then `rt login`, and `rt probe <code> --schema <schema> --tables ...` for every code (the coverage gate reads each workspace's `probe.md`).
+6. **Group conventions first.** Create or extend `rules/groups/<group>.md` as each decision comes up and before you judge; the group file is shared by every code of the group; Q ids are only ever appended.
+7. **Measure once per screen group** (in the host workspace):
+   - `rt scaffold <host>` writes `measure_<host>.py`, `gen_checks.py` and `build_workbook.py` skeletons (`--like <code>` starts from a sibling).
+   - **Data and API facts: Python, not shell.** `from reportkit.measure import Measure` gives `api`, `rows`, `all_rows` (one big page = a stable reference), `paging_stability`, `download`, `sql`, `scope_ids`, `save`. Only read-only endpoints (you read the handler). `rt api GET /path` in Git Bash is rewritten into a Windows path: use Python, or `MSYS_NO_PATHCONV=1`.
+   - **UI facts:** `gen_checks.py` -> `checks.yaml`; the profile's `ui.pre_steps` already removes onboarding tours / banners; stubs go in the entry-level `routes:` (before load).
+   - What to measure on every list screen: scope against permission and SQL (all rows, all columns), every filter and every dropdown value, text filters (case, accents, `%` `_`, spaces), **paging stability at several page sizes** (a sort without a tie-break repeats and loses rows), every sortable column (case, blanks last, displayed vs stored value), export vs grid for the same filters, the **empty export** (template placeholders left in?), number / date formats in the file, English mode (labels, **raw i18n keys**, data stays Vietnamese), simulated 500 (a message, or does it look like "no data"?), XSS typed / in the URL / in stubbed data, injection strings on every read-only parameter, ids outside the permission scope on detail endpoints.
+   - On every detail tab / popup: each list against SQL for every in-scope parent, soft-deleted rows, order, a parent with more than one page, empty parent, server-error stub, code-to-name display, duplicates in the data.
+   - **Run the UI batch in the background, wait once:** `rt check <host> --pending > log &` followed by one background `until grep -q finished log; do sleep 15; done`. No per-entry monitor, no polling loop in the conversation. Read results with `rt show <host> <ids|all>` (merged across runs, noise requests hidden). A run you stopped half way is finished by `rt check <host> --pending`.
+   - **Before writing a number into a case, re-measure it** if the data may have moved (others edit the shared environment); say "lúc đo" in the precondition row.
+   - **A failure that looks transient** (a connection toast once, raw codes once, a first call after login) is re-run before it becomes an F.
+8. **One workbook per code:** `rt scaffold <code>` (or the host's build script as a start), then cases with `reportkit.wbhelpers.make` (constants for the "Căn cứ" lines, `T` for run cases, `NR` for not-run cases), `wb.waive` for requirements with no case, `rt build <code> --check` until the gate prints OK (coverage, wording, group conventions), then `rt build <code>`. Write operations and anything that sends data out (mail, another system) are "Chưa thực hiện" with the reason, never run.
+9. **Progress.** When the user asks how far you are, answer from a per-code checklist (read / measured / workbook written / gate / delivered), with a real percentage and what is left; say in one line what you are doing before any long step.
+10. **One hand-off for the whole batch** (`output-format.md`): the audience line, one table (code, file, cases, F, not run), the group conventions added (Qn, one line each, for the BA), bugs one line each with one example per code, what was not run and why, functions found half-built, how codes without their own screen were understood, the sharing statement (measured once, standalone workbooks), and the lessons you added to `rules/lessons.md`.
+
+**`analysis.md` format** (what sub-agents return, what you save): `## Màn hình` (every field / column / button with label and source), `## Quy tắc` (one line per rule, each starting `R1. `, `R2. `..., plain words with `file:line`), `## Có vẻ sai` (hypotheses with both sides' `file:line`), `## Endpoint đọc/ghi` (verb, URL, READ-ONLY or WRITES by what the handler does), `## Chưa nối dây` (half-built parts).
+
+## Token economy
+
+- Trace code in sub-agents (read only, 5 minutes, text result); keep only their conclusions in `analysis.md`.
+- Several codes in one request (`rt batch`): measure each screen once, reuse the host's scripts (`rt scaffold --like`).
+- Keep tool output small: `rt show` (not raw JSON), `--keys`, `--limit`; screenshots only when a verdict depends on the picture.
+- Start long runs in the background and wait once; never poll, never arm one monitor per entry, never let a sub-agent wait.
+- It changes how the work is done, never the workbook.
 
 ## What a verdict is based on
 
@@ -95,7 +137,7 @@ Never renumber or reuse a Q id. To change a decision, edit its row and add the d
   - The DB is read with SELECT only, through `rt sql` or the checks. The kit refuses anything else.
   - Never create or change data on the shared environment. DEV / BA prepare test data.
   - Only call endpoints whose handler you have read and found to be read-only. Classify by what the handler does, not by the HTTP verb.
-- **Workbook wording.** The workbook states each verdict and its basis, nothing about how the test set was put together:
+- **Workbook wording.** The workbook states each verdict and its basis, nothing about how the test set was put together (and nothing about another code's workbook):
   - never cite an SRS (no `Căn cứ: SRS …`): none was read;
   - never write that the SRS is outdated, was not used, or that the code is the reference;
   - the basis line uses the wording in `references/output-format.md` ("Căn cứ").
@@ -131,7 +173,7 @@ Do the steps in order and don't skip one. Each step leaves files in the workspac
 
    **If `brief.md` lists sibling reports**, this is probably the same screen seen by another kind of user or with another filter (1E_117 internal / 1E_118 public company: one `/dashboard`).
    - Find what differs before writing any case: the account type, the data scope, the filter. The workbook is about that difference.
-   - Shared behaviour: cite the sibling's case ("xem 1E_117_12") instead of copying it, unless you re-run it with what makes this report different.
+   - Shared behaviour: rebuild it as this code's own case (each workbook is read alone by a Tester; never cite another workbook), re-measured or "Chưa thực hiện" when this account cannot see it.
    - If the difference needs an account or data you don't have, say so in step 4, not after the workbook is built. A workbook whose own cases are all "Chưa thực hiện" tests nothing new.
 
    Then read, in this order:

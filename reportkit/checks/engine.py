@@ -14,8 +14,9 @@ Statuses describe the measurement only. Claude decides P / F / PE from the rules
           ERR    the step itself failed (selector, HTTP error, SQL error) - fix and re-run
 
 Output: <workspace>/runs/<run id>/<id>.json, summary.json, summary.md (short, for Claude).
-Re-run only what broke: `--only D01,U03`, or `--redo` (every NM / ERR of the latest run). The other
-entries are carried over from the latest run, so the summary always covers everything.
+Re-run only what broke: `--only D01,U03`, `--redo` (every NM / ERR of the latest run) or `--pending` (every entry that has no
+result yet, plus every NM / ERR: the way to finish a batch that was stopped or to run the entries added to checks.yaml since).
+The other entries are carried over from the latest run, so the summary always covers everything.
 """
 import datetime as _dt
 import json
@@ -42,7 +43,7 @@ def load(ws):
     return spec
 
 
-def run(profile, ws, only=None, redo=False, kinds=("data", "ui"), label=None):
+def run(profile, ws, only=None, redo=False, kinds=("data", "ui"), label=None, pending=False):
     spec = load(ws)
     system = spec.get("system") or next(iter(profile.systems))
     prev = ws.latest_run()
@@ -52,6 +53,13 @@ def run(profile, ws, only=None, redo=False, kinds=("data", "ui"), label=None):
         selected |= {c["id"] for c in prev_sum["checks"] if c["status"] in ("NM", "ERR")}
     if redo and not selected:
         print("Nothing to redo: the latest run has no NM / ERR entries."); return prev, prev_sum
+    if pending:
+        from .. import results as _res
+        have = {i for i, st in _res.statuses(ws).items() if st not in ("NM", "ERR", None)}      # newest result of each entry, any run
+        selected |= {c["id"] for c in (spec.get("data") or []) + (spec.get("ui") or []) if c["id"] not in have}
+        if not selected:
+            print("Nothing pending: every entry of checks.yaml has a result."); return prev, prev_sum
+        print("Pending: %d entries (%s%s)" % (len(selected), ",".join(sorted(selected)[:12]), "..." if len(selected) > 12 else ""))
     run_id = _dt.datetime.now().strftime("%Y%m%d-%H%M%S") + ("-" + label if label else "")
     rd = os.path.join(ws.runs_dir(), run_id); os.makedirs(rd, exist_ok=True)
     bv = dict(base_vars(), login_user=profile.secrets().get("login_user"))
@@ -90,11 +98,15 @@ def run(profile, ws, only=None, redo=False, kinds=("data", "ui"), label=None):
                 b.close()
     done = {r["id"] for r in results}
     if selected and prev:
+        from .. import results as _res
         for c in (spec.get("data") or []) + (spec.get("ui") or []):
-            src = os.path.join(prev, c["id"] + ".json")
-            if c["id"] not in done and os.path.exists(src):
-                r = _read(src); r["carried_from"] = r.get("carried_from") or os.path.basename(prev)
-                _copy_shots(prev, rd, c["id"])
+            if c["id"] in done:
+                continue
+            r = _res.latest(ws, c["id"])               # newest result in ANY earlier run (a stopped run has no summary)
+            if r:
+                src_run = r.pop("_run")
+                r["carried_from"] = r.get("carried_from") or src_run
+                _copy_shots(os.path.join(ws.runs_dir(), src_run), rd, c["id"])
                 results.append(_write(rd, r))
     order = [c["id"] for c in (spec.get("data") or []) + (spec.get("ui") or [])]
     results.sort(key=lambda r: order.index(r["id"]) if r["id"] in order else 999)

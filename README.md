@@ -1,6 +1,6 @@
 # report-kit: kiểm thử màn hình báo cáo / tra cứu / thống kê bằng một lệnh
 
-Gõ `/report-test <mã>` trong Claude Code, ví dụ `/report-test 1E_117`. Bộ kit chạy từ đầu đến cuối:
+Gõ `/report-test <mã>` trong Claude Code, ví dụ `/report-test 1E_117`, hoặc **nhiều mã một lần**: `/report-test 2B_18, 2B_19, 2B_20` (xem "Nhiều mã một lần" bên dưới). Bộ kit chạy từ đầu đến cuối:
 
 1. tìm chức năng trong danh sách chức năng, Quy chuẩn và workbook cũ, rồi dò code từ đường dẫn menu;
 2. hỏi anh/chị **một lần** (tài khoản, có cho SELECT DB không, có ai đang demo không);
@@ -12,6 +12,20 @@ Gõ `/report-test <mã>` trong Claude Code, ví dụ `/report-test 1E_117`. Bộ
 - **Claude** đọc code của chức năng (đó là đặc tả), rồi **đánh giá** mọi kết quả theo Quy chuẩn chung, tính nhất quán của chính hệ thống và quy tắc mà code áp dụng. Kit không đọc SRS.
 - **Lệnh `rt`** làm phần cơ học: tìm đầu vào, dò code, đăng nhập, chạy các bước quan sát và so sánh, dựng workbook.
 - Kit **không tự chấm đạt / lỗi**, không sinh code test cho từng testcase, và không dùng assertion.
+
+## Nhiều mã một lần (nhánh `batch-shared-screens`)
+
+`/report-test 2B_18, 2B_19, 2B_20, 2B_21` là đủ, không cần nhắc thêm gì. Skill tự làm theo luồng sau:
+
+1. `rt batch <các mã>`: chạy `rt start` cho từng mã, **gom các mã cùng một màn hình** (cùng route / component / file code đầu bảng), ghi kế hoạch vào `<work_root>/_batch/<id>.md`. Mã không dò ra màn (popup, tab, trang chi tiết của màn khác) thì gắn bằng `--join <mã>:<mã chủ>`.
+2. **Đo một lần cho mỗi màn** ở workspace "chủ" của nhóm; **mỗi mã vẫn có workbook riêng, đầy đủ, không viện dẫn workbook khác**.
+3. Dò code song song bằng subagent (chỉ đọc code, tối đa 5 phút, không chờ, trả kết quả dạng text; Claude ghi `analysis.md`). Subagent không chạy `rt check` hay việc nào phải chờ.
+4. Hỏi người dùng **một lần** (tài khoản, SELECT chỉ đọc, có ai đang dùng môi trường), rồi đăng nhập và dò bẫy dữ liệu cho mọi mã.
+5. Quy ước nhóm (Claude làm BA) ghi vào `rules/groups/<nhóm>.md` trước khi chấm.
+6. Đo: `rt scaffold <mã>` tạo `measure_<mã>.py` (dùng `reportkit.measure.Measure`: API + SQL chỉ đọc, kiểm phân trang, so với SQL độc lập), `gen_checks.py` (mục giao diện) và `build_workbook.py`. Chạy giao diện nền bằng `rt check <mã> --pending`, chờ **một lần**, đọc bằng `rt show`.
+7. Mỗi mã: `rt build <mã> --check` đến khi qua cổng, rồi `rt build <mã>`. Một bản bàn giao chung cho cả lô.
+
+Cấu hình hồ sơ liên quan: `ui.pre_steps` (gỡ tour hướng dẫn / banner chặn thao tác), `ui.noise_requests`, `workbook.helpers` (câu đăng nhập, người thực hiện, tên môi trường cho `reportkit.wbhelpers`).
 
 ## Cài đặt (một lần mỗi máy)
 
@@ -50,10 +64,13 @@ Có thể thay bằng biến môi trường `RK_LOGIN_USER`, `RK_LOGIN_PASSWORD`
 | Lệnh | Làm gì |
 |---|---|
 | `rt doctor [--db]` | Kiểm tra thư viện, trình duyệt, hồ sơ, secrets, mạng (DB chỉ khi có `--db`) |
+| `rt batch <mã> <mã> ... [--join A:B]` | Nhiều mã một lần: `rt start` từng mã, gom theo màn hình, ghi kế hoạch |
+| `rt show <mã> <id\|all> [--keys ..]` | Đọc gọn kết quả `rt check` (gộp nhiều lần chạy, ẩn các yêu cầu nền) |
+| `rt scaffold <mã> [--like mã]` | Tạo khung `measure_<mã>.py`, `gen_checks.py`, `build_workbook.py` |
 | `rt start <mã> [--route /đường-dẫn]` | Tìm chức năng, trích Quy chuẩn, workbook cũ (kèm comment), dò code từ menu → màn hình → API → handler / view → `brief.md`. `--route` khi đường dẫn menu không khớp |
 | `rt login` | Đăng nhập SSO thật, lưu phiên. Phiên còn hạn thì dùng lại |
 | `rt probe <mã>` | Chạy bộ bẫy dữ liệu trên các bảng của báo cáo → `probe.md` |
-| `rt check <mã> [--only D01,U03] [--redo]` | Chạy `checks.yaml`. Mỗi mục chạy riêng; `--redo` chạy lại các mục NM / ERR |
+| `rt check <mã> [--only D01,U03] [--redo] [--pending]` | Chạy `checks.yaml`. Mỗi mục chạy riêng; `--redo` chạy lại các mục NM / ERR; `--pending` chạy mọi mục chưa có kết quả |
 | `rt build <mã>` | Chạy `build_workbook.py` của workspace và kiểm chất lượng sheet test case: kết quả cụ thể, không dòng ẩn, câu chữ dễ đọc cho Tester / BA |
 | `rt status <mã>` | Bước nào xong, bước nào tiếp theo (tiếp tục khi phiên bị ngắt) |
 | `rt sql "<SELECT>"`, `rt api GET /path` | Tra nhanh (chỉ SELECT; chỉ gọi endpoint đã xác nhận là chỉ đọc) |

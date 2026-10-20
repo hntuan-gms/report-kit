@@ -179,3 +179,9 @@ An older `build_workbook.py` that calls `wb.sheet_*` or `reportkit.evidence` no 
 - What could not be run and why; what changed since the previous version.
 - Rules from `analysis.md` or FOUND traps with no case, and the half-built functions found in the code (no case written for them).
 - Transactions: the ones the function does not offer (their F cases), the ones waived and why, and for a function marked "Sửa" / "Bổ sung", which `T` the previous version did not cover.
+
+## Several workbooks from one batch
+
+- Each workbook is **standalone**: its own full set of cases, never a reference to another workbook ("xem 2B_18_5", "dùng chung ..."). Shared measurements are used inside each workbook for the part that code covers.
+- `reportkit.wbhelpers.make(code, name=..., screen=..., ticket=..., ascii_name=..., group="2B.I", system="audit")` gives `H.wb`, `H.T` (case with a verdict), `H.NR` (not run), the "Căn cứ" constants (`H.QC("II.5.1")`, `H.QU("Q4")`, `H.FN`, `H.SELF`, `H.RT`, `H.SEC`, `H.CORRECT("...")`), `H.WRITE`, `H.LOGIN`, `H.QUYUOC` (the precondition sentence for group conventions) and `H.run_note(from, to)` (person, account and the site's build date). The project's own sentences live in the profile's `workbook.helpers`.
+- Batch hand-off: the audience line; one table with code, file, number of cases, F, not run; group conventions added (Qn, one line each); bugs one line each with one example per code; not run and why; half-built functions; how a function without its own screen was understood; "measured once per screen, each workbook standalone".

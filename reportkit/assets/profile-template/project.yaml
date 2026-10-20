@@ -39,6 +39,9 @@ ui:
   api_marker: "/api/"
   toast: "[class*=toast]"
   lang: {}                                      # e.g. {open: "#lang", en: "[aria-label='English']", vi: "..."}
+  noise_requests: ["/profile", "session-info"]  # `rt show` hides requests whose path contains one of these
+  pre_steps: []                                 # steps run after load, once `ready` holds, and after goto / reload: dismiss a first-visit
+                                                #   tour or banner that blocks clicks, e.g. - js: "()=>{document.querySelectorAll('.driver-popover-close-btn').forEach(b=>b.click())}"
 
 inputs:
   function_list:
@@ -75,3 +78,7 @@ workbook:
   style_rows: {chapter: 12, pre: 13, cat: 14, sub: 15, grp: 24, case: 16}
   header_cells: {screen: D2, code: D3}
   run_header_row: 11
+  helpers:                                      # text for reportkit.wbhelpers.make() in build_workbook.py
+    person: "Your name"
+    by_system:
+      main: {login_line: "Đăng nhập hệ thống bằng tài khoản <role>", env_label: "<host name>", system: main}
