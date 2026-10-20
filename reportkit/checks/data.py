@@ -62,7 +62,7 @@ def _actual(profile, system, spec, vars_, run_dir, tag):
     spec = render(spec, vars_)
     if "api" in spec:
         a = spec["api"]
-        sc, body = http.json_call(profile, system, a.get("method", "GET"), a["path"], a.get("params"), a.get("body"))
+        sc, body = http.json_call(profile, system, a.get("method", "GET"), a["path"], a.get("params"), a.get("body"), a.get("headers"))
         if sc != 200:
             return None, {"http_status": sc, "body": str(body)[:500]}
         rows = http.dig(body, a.get("rows"))

@@ -35,14 +35,14 @@ def reset(profile, system):
     _sessions.pop((profile.name, system), None)
 
 
-def call(profile, system, method, path, params=None, body=None, timeout=120):
+def call(profile, system, method, path, params=None, body=None, timeout=120, headers=None):
     api = profile.system(system)["api"].rstrip("/")
-    r = session(profile, system).request(method.upper(), api + path, params=params, json=body, timeout=timeout)
+    r = session(profile, system).request(method.upper(), api + path, params=params, json=body, timeout=timeout, headers={k: str(v) for k, v in headers.items()} if headers else None)
     return r
 
 
-def json_call(profile, system, method, path, params=None, body=None):
-    r = call(profile, system, method, path, params, body)
+def json_call(profile, system, method, path, params=None, body=None, headers=None):
+    r = call(profile, system, method, path, params, body, headers=headers)
     ct = r.headers.get("Content-Type", "")
     return r.status_code, (r.json() if "json" in ct else r.text[:2000])
 
