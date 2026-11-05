@@ -131,7 +131,7 @@ class Workbook(object):
         fname = cfg.get("file_name", "{ticket}_{code_nodash}_{ascii_name}_v{version}.xlsx").format(
             ticket=ticket, code=ws.code, code_nodash=ws.code.replace("_", ""), ascii_name=ascii_name or ws.code, version=version)
         self.out = out or os.path.join(prof.expand(cfg.get("out_dir", "{tools_dir}")), fname)
-        if os.path.exists(self.out):
+        if os.path.exists(self.out) and not self._own_draft():
             raise SystemExit("%s already exists. Never overwrite a delivered version - use version=%d." % (self.out, version + 1))
         f = cfg.get("font", "Times New Roman")
         self.FONT = Font(name=f, size=12); self.FONT_B = Font(name=f, size=12, bold=True)
@@ -143,6 +143,7 @@ class Workbook(object):
         self.st = {k: cap(r) for k, r in rows.items()}
         self.first = int(cfg.get("first_row", 12))
         self.cases = []                       # (row, purpose) of every tc(), for sheet_coverage()
+        self.case_errors = []                 # reported together by finish() / save(): one rebuild fixes them all
         self.pre_h = sh.row_dimensions[rows.get("pre", 13)].height
         for m in [str(m) for m in sh.merged_cells.ranges if m.min_row >= self.first]:
             sh.unmerge_cells(m)
@@ -184,11 +185,20 @@ class Workbook(object):
     def pre(self, t):
         r = self._put("pre", t, merge=True); self.ws.row_dimensions[r].height = self.pre_h
 
+    def _own_draft(self):
+        """The file is this workspace's last `rt build` and nobody saved it since (same mtime): rebuilding it is fine.
+        A delivered or reviewed file (opened and saved, so another mtime) still needs a new version."""
+        b = (self.space.state().get("steps") or {}).get("build") or {}
+        try:
+            return b.get("file") == self.out and abs(os.path.getmtime(self.out) - float(b.get("mtime", -1))) < 1
+        except OSError:
+            return False
+
     def tc(self, purpose, steps, expected, basis=None, status=None, actual=None, bug=None, run=1):
         if status is None and not actual:
             actual = "Chưa thực hiện"
         if status in ("P", "F", "PE") and actual in (None, "", "P", "F", "PE"):
-            raise ValueError("tc(%r): 'actual' must describe what happened, not just the status" % purpose)
+            self.case_errors.append("tc(%r): 'actual' must describe what happened, not just the status" % purpose)
         r = self._put("case", purpose, steps, expected, basis)
         set_text(self.ws.cell(r, 8), actual)
         if status:
@@ -214,21 +224,24 @@ class Workbook(object):
         Case ids and the P/F/PE tally are filled in from the test case sheet.
         """
         import collections
-        ids, data = self.case_ids(), []
+        ids, data, errors = self.case_ids(), [], []
         for i, (src, item, req, keys, nt) in enumerate(rows, 1):
             keys, nt = list(keys or []), nt or ""
             if not keys and not nt.startswith(COV_REASONS):
-                raise ValueError("coverage row %d (%s %s): no case - the note must start with %s" % (i, src, item, " / ".join(COV_REASONS)))
+                errors.append("coverage row %d (%s %s): no case - the note must start with %s" % (i, src, item, " / ".join(COV_REASONS)))
             miss = [k for k in keys if not any(p.startswith(k) for p, _, _ in ids.values())]
             if miss:
-                raise ValueError("coverage row %d (%s %s): no case whose 'Mục đích' starts with %r" % (i, src, item, miss))
+                errors.append("coverage row %d (%s %s): no case whose 'Mục đích' starts with %r" % (i, src, item, miss))
             hit = [(cid, st) for _, (p, cid, st) in sorted(ids.items()) if any(p.startswith(k) for k in keys)]
             tally = collections.Counter(st or "chưa chạy" for _, st in hit)
             data.append((i, src, item, req, ", ".join(c for c, _ in hit) or "-",
                          ", ".join("%s: %d" % kv for kv in tally.items()) or "-", nt))
+        if errors:      # every bad row at once: one fix-and-rebuild turn instead of one per row
+            raise ValueError("%d coverage row(s) to fix:\n  " % len(errors) + "\n  ".join(errors))
         return self.table(COV_SHEET, title, COV_HEADERS, data, [6, 22, 26, 56, 30, 26, 52], note or COV_NOTE)
 
     def finish(self, run_date, run_note, author="", run=1):
+        self._raise_case_errors()             # all bad cases of the sheet at once, before the companion sheets
         sh, last, f = self.ws, self.row - 1, self.first
         sh["D4"] = '=COUNTIF($E$%d:$E$%d,"P")' % (f, last)
         sh["D5"] = '=COUNTIF($E$%d:$E$%d,"F")' % (f, last)
@@ -372,7 +385,12 @@ class Workbook(object):
     def sheet_sources(self, rows, title, headers, widths):
         return self.table("Nguồn dữ liệu", title, headers, rows, widths)
 
+    def _raise_case_errors(self):
+        if self.case_errors:
+            raise ValueError("%d case(s) to fix:\n  " % len(self.case_errors) + "\n  ".join(self.case_errors))
+
     def save(self):
+        self._raise_case_errors()
         self.wb.active = 0
         os.makedirs(os.path.dirname(self.out), exist_ok=True)
         self.wb.save(self.out)

@@ -287,20 +287,30 @@ def resolve_route(code, route, fe=None):
             m = pat.search(text)
             if not m:
                 continue
-            window = text[m.end():m.end() + 600]
-            nxt = re.search(r"\bpath\s*:", window)
-            window = window[:nxt.start()] if nxt else window
-            imp = _LOAD.search(window)
-            comp = None
-            if imp:
-                comp = _resolve_import(code, rel, imp.group(1))
-            else:
-                cm = _COMP.search(window)
-                if cm:
-                    im = re.search(r"import\s*\{[^}]*\b%s\b[^}]*\}\s*from\s*['\"]([^'\"]+)['\"]" % cm.group(1), text)
-                    comp = _resolve_import(code, rel, im.group(1)) if im else None
+            comp = _route_component(code, rel, text, m.end())
+            if not comp:
+                # { path: 'x', children: [ { path: '', loadComponent: ... } ] }: the menu opens the empty child
+                child = re.match(r"\s*,?\s*(?:\w+\s*:[^\n]*\n\s*)*?children\s*:\s*\[\s*\{\s*path\s*:\s*['\"]['\"]",
+                                 text[m.end():m.end() + 400])
+                if child:
+                    comp = _route_component(code, rel, text, m.end() + child.end())
             if comp:
                 return rel, code.line(text, m.start()), comp
+    return None
+
+
+def _route_component(code, rel, text, start):
+    """The component of the route whose `path:` ends at `start`, when it loads or names one before the next `path:`."""
+    window = text[start:start + 600]
+    nxt = re.search(r"\bpath\s*:", window)
+    window = window[:nxt.start()] if nxt else window
+    imp = _LOAD.search(window)
+    if imp:
+        return _resolve_import(code, rel, imp.group(1))
+    cm = _COMP.search(window)
+    if cm:
+        im = re.search(r"import\s*\{[^}]*\b%s\b[^}]*\}\s*from\s*['\"]([^'\"]+)['\"]" % cm.group(1), text)
+        return _resolve_import(code, rel, im.group(1)) if im else None
     return None
 
 

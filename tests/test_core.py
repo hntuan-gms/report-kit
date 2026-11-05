@@ -385,3 +385,255 @@ def test_evidence_run_shot_and_lint(tmp_path):
     assert any("đánh dấu" in x for x in w) and any("hôm nay" in x for x in w)
     c = E.card("BUG-01", ["s"], "a", "e", [p], title="t", status="Mở", captured="05/10/2026 10:00")
     assert E.lint(c, today="05/10/2026") == []
+
+
+class _StubCode(object):
+    def __init__(self, files):
+        self.f = files; self.files = list(files)
+
+    def text(self, rel):
+        return self.f.get(rel, "")
+
+    def exists(self, rel):
+        return rel in self.f
+
+    @staticmethod
+    def line(text, pos):
+        return text.count("\n", 0, pos) + 1
+
+
+def test_resolve_route_nested_children():
+    routes = """export const routes = [
+	{
+		path: 'shareholder-insider-lookup',
+		children: [
+			{
+				path: '',
+				loadComponent: () => import('./lookup/lookup.component').then((c) => c.LookupComponent),
+			},
+			{
+				path: 'insider-related-major',
+				loadComponent: () => import('./major/major.component').then((c) => c.MajorComponent),
+			},
+		],
+	},
+];"""
+    code = _StubCode({"app/profile.routes.ts": routes, "app/lookup/lookup.component.ts": "", "app/major/major.component.ts": ""})
+    assert locate.resolve_route(code, "/profile-management/shareholder-insider-lookup")[2] == "app/lookup/lookup.component.ts"
+    assert locate.resolve_route(code, "/x/shareholder-insider-lookup/insider-related-major")[2] == "app/major/major.component.ts"
+
+
+def test_ui_error_reason_keeps_the_blocking_element():
+    from reportkit.checks import ui
+    log = ("Locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"#b\")\n"
+           "    - locator resolved to <button id=\"b\">Tìm kiếm</button>\n  - attempting click action\n"
+           "      - <div class=\"driver-overlay\">Hướng dẫn nhanh</div> intercepts pointer events\n    - retrying click action")
+    r = ui._err_reason(Exception(log))
+    assert r.startswith("Locator.click: Timeout 30000ms exceeded. | ") and "driver-overlay" in r and "intercepts" in r
+    r = ui._err_reason(Exception("Locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"#nope\")"))
+    assert "matched nothing" in r and "#nope" in r
+    assert ui._err_reason(Exception("boom")) == "boom"
+
+
+def test_rt_show_prints_only_the_asked_entries(tmp_path, capsys):
+    from reportkit import cli
+    import json as J
+    root = tmp_path / "repo"; _fake_repo(root)
+    prof = _mini_profile(tmp_path, {"paths": {"tools_dir": str(tmp_path / "tools"), "work_root": str(tmp_path / "w"), "code_root": str(root)}})
+    rd = tmp_path / "w" / "1E_117" / "runs" / "20261103-100000"; rd.mkdir(parents=True)
+    checks = [{"id": "U01", "status": "OBS", "title": "a"}, {"id": "U02", "status": "ERR", "title": "b"}]
+    (rd / "summary.json").write_text(J.dumps({"run": "20261103-100000", "report": "1E_117", "system": "ids", "checks": checks}), encoding="utf-8")
+    (rd / "U01.json").write_text(J.dumps({"id": "U01", "status": "OBS", "kind": "ui", "observations": {"rows": [1, 2], "heads": ["STT"]}}), encoding="utf-8")
+    (rd / "U02.json").write_text(J.dumps({"id": "U02", "status": "ERR", "kind": "ui", "reason": "Timeout | overlay"}), encoding="utf-8")
+    cli.main(["--profile", prof.dir, "show", "1E_117", "U01", "--keys", "heads"])
+    out = capsys.readouterr().out
+    assert "## U01" in out and "heads" in out and "rows" not in out and "U02" not in out
+    assert "Counts (whole run): ERR=1, OBS=1 | shown: 1" in out
+    cli.main(["--profile", prof.dir, "show", "1E_117", "--status", "ERR"])
+    out = capsys.readouterr().out
+    assert "## U02 [ERR]" in out and "overlay" in out and "## U01" not in out
+
+
+def test_rt_sql_runs_several_selects_and_keeps_going(tmp_path, capsys, monkeypatch):
+    from reportkit import cli, db
+    prof = _mini_profile(tmp_path)
+    monkeypatch.setattr(db, "q", lambda p, sql, params=None, schema="default": [{"N": i} for i in range(3)]
+                        if safety.check_sql(sql) else [])
+    cli.main(["--profile", prof.dir, "sql", "SELECT 1 FROM DUAL", "DELETE FROM X", "SELECT 2 FROM DUAL", "--limit", "2"])
+    out = capsys.readouterr().out
+    assert out.count("-- [") == 3 and "ERROR: only SELECT" in out and out.count('{"N": 0}') == 2
+    assert out.count("… 1 more rows") == 2
+
+
+def _budget_ws(tmp_path):
+    prof = _mini_profile(tmp_path, {"paths": {"tools_dir": str(tmp_path / "tools"), "work_root": str(tmp_path / "w")}})
+    ws = prof.workspace("1E_117")
+    spec = {"system": next(iter(prof.systems)),
+            "data": [{"id": "D%02d" % i, "title": "d"} for i in range(1, 4)],
+            "ui": [{"id": "U%02d" % i, "title": "u", "page": "/"} for i in range(1, 5)]}
+    with open(os.path.join(ws.dir, "checks.yaml"), "w", encoding="utf-8") as f:
+        yaml.safe_dump(spec, f)
+    return prof, ws
+
+
+def test_check_budget_leaves_the_rest_as_todo_and_redo_runs_it(tmp_path, monkeypatch):
+    import contextlib, time, types
+    import playwright.sync_api as pw
+    from reportkit.checks import engine
+    prof, ws = _budget_ws(tmp_path)
+    monkeypatch.setattr(engine.data_check, "run", lambda *a, **k: (time.sleep(0.8), {"status": "MATCH", "cells": 1})[1])
+    monkeypatch.setattr(engine.ui_check, "run", lambda p, s, c, b, rd: (time.sleep(0.8), {"id": c["id"], "status": "OBS"})[1])
+    fake = types.SimpleNamespace(chromium=types.SimpleNamespace(launch=lambda: types.SimpleNamespace(close=lambda: None)))
+    monkeypatch.setattr(pw, "sync_playwright", lambda: contextlib.nullcontext(fake))
+    rd, summary = engine.run(prof, ws, budget=3)
+    st = {c["id"]: c["status"] for c in summary["checks"]}
+    assert list(st) == ["D01", "D02", "D03", "U01", "U02", "U03", "U04"]          # order kept
+    assert "TODO" in st.values() and st["D01"] == "MATCH"
+    todo = {i for i, s in st.items() if s == "TODO"}
+    rd2, summary2 = engine.run(prof, ws, redo=True, budget=0)
+    st2 = {c["id"]: (c["status"], c.get("carried_from")) for c in summary2["checks"]}
+    assert all(st2[i][0] != "TODO" and not st2[i][1] for i in todo)               # the TODO ones ran
+    assert all(st2[i][1] for i in st if i not in todo)                              # the others were carried
+
+
+def test_deployed_crawls_imported_chunks_and_searches(tmp_path):
+    from reportkit import deployed
+    site = {"/index.html": '<script src="assets/js/app.js"></script><script type="module" src="main.js"></script>'
+                           '<link rel="modulepreload" href="chunk-AAA.js">',
+            "/main.js": 'import("./chunk-BBB.js"); x="chunk-AAA.js"',
+            "/chunk-AAA.js": "var a=1;",
+            "/chunk-BBB.js": 'label: this.translate.instant("relatedParties.detail.ownership.updateDate")'}
+    got = []
+    def fetch(url):
+        path = url.replace("http://x.test", ""); got.append(path)
+        return site[path]
+    files = deployed.crawl("http://x.test/", str(tmp_path), fetch=fetch)
+    assert set(files) == {"main.js", "chunk-AAA.js", "chunk-BBB.js"} and "/assets/js/app.js" not in got
+    hits = deployed.search(files, r"ownership\.updateDate", context=10)
+    assert [h[0] for h in hits] == ["chunk-BBB.js"] and "updateDate" in hits[0][2]
+    got.clear(); deployed.crawl("http://x.test/", str(tmp_path), fetch=fetch)
+    assert got == []                                                     # second call is served from the cache
+
+
+def test_gates_report_every_problem_at_once(tmp_path):
+    from reportkit import workbook as W
+    prof = _mini_profile(tmp_path); ws = prof.workspace("X_1")
+    wb = W.Workbook(prof, ws, name="n", screen="s", ticket="T", ascii_name="N")
+    wb.chapter("C"); wb.cat("G")
+    wb.tc("Kiểm tra A", "1.", "kq", status="P", actual="P")
+    wb.tc("Kiểm tra B", "1.", "kq", status="F", actual="")
+    wb.tc("Kiểm tra C", "1.", "kq", status="P", actual="thấy C")
+    with pytest.raises(ValueError) as e:
+        wb.finish(run_date="01/01/2026", run_note="n")
+    assert "2 case(s) to fix" in str(e.value) and "Kiểm tra A" in str(e.value) and "Kiểm tra B" in str(e.value)
+    wb.case_errors.clear()
+    with pytest.raises(ValueError) as e:
+        wb.sheet_coverage([("Q", "B1", "r", ["Kiểm tra Z"], ""), ("Q", "B2", "r", [], "vì sao"),
+                           ("Q", "B3", "r", ["Kiểm tra C"], "")], "t")
+    assert "2 coverage row(s) to fix" in str(e.value) and "B1" in str(e.value) and "B2" in str(e.value)
+
+
+def test_rebuild_replaces_only_this_runs_untouched_draft(tmp_path):
+    import time
+    from reportkit import workbook as W
+    prof = _mini_profile(tmp_path); ws = prof.workspace("X_1")
+    out = W.Workbook(prof, ws, name="n", screen="s", ticket="T", ascii_name="N").save()
+    with pytest.raises(SystemExit):                       # not built by `rt build`: a delivered file, never overwritten
+        W.Workbook(prof, ws, name="n", screen="s", ticket="T", ascii_name="N")
+    ws.mark("build", file=out, mtime=os.path.getmtime(out))
+    W.Workbook(prof, ws, name="n", screen="s", ticket="T", ascii_name="N").save()        # this run's draft: rebuilt
+    ws.mark("build", file=out, mtime=os.path.getmtime(out))
+    time.sleep(1.1); open(out, "ab").close(); os.utime(out, None)                      # someone opened and saved it
+    with pytest.raises(SystemExit):
+        W.Workbook(prof, ws, name="n", screen="s", ticket="T", ascii_name="N")
+
+
+def test_network_errors_are_one_line(tmp_path, monkeypatch, capsys):
+    import requests
+    from reportkit import cli, db
+    prof = _mini_profile(tmp_path)
+    def boom(*a, **k):
+        raise requests.exceptions.ConnectionError("('Connection aborted.', RemoteDisconnected('closed'))")
+    monkeypatch.setattr(db, "q", boom)
+    with pytest.raises(SystemExit) as e:
+        cli.main(["--profile", prof.dir, "sql", "SELECT 1 FROM DUAL"])
+    assert str(e.value).startswith("network: ConnectionError") and "\n" not in str(e.value)
+
+
+def test_brief_names_the_group_conventions(tmp_path):
+    from reportkit import cli
+    prof = _mini_profile(tmp_path, {"rules": {"groups": "rules/groups"}})
+    gdir = os.path.join(prof.dir, "rules", "groups"); os.makedirs(gdir, exist_ok=True)
+    open(os.path.join(gdir, "1B.III.3.md"), "w", encoding="utf-8").write("# Quy ước")
+    assert cli._group_rules(prof, {"group": "# 1B.III.3_Cổ đông lớn"}).startswith(os.path.join(gdir, "1B.III.3.md"))
+    assert cli._group_rules(prof, {"group": "# 1B.III.5_Khác"}).startswith("none yet for group 1B.III.5")
+    assert cli._group_rules(prof, {"group": ""}).startswith("none (")
+
+
+def test_probe_reuses_a_siblings_same_day_probe_and_prints_a_summary(tmp_path, capsys, monkeypatch):
+    import json as J
+    from reportkit import cli, probe
+    prof = _mini_profile(tmp_path, {"paths": {"tools_dir": str(tmp_path / "tools"), "work_root": str(tmp_path / "w")}})
+    a, b = prof.workspace("1B_47"), prof.workspace("1B_48")
+    out = {"schema": "default", "tables": {"T1": {"traps": [{"id": "orphan", "title": "o", "flagged": True, "rows": [[1]]}]},
+                                           "T2": {"traps": [{"id": "dup", "title": "d", "flagged": False}]}}}
+    open(os.path.join(a.dir, "probe.json"), "w", encoding="utf-8").write(J.dumps(out))
+    monkeypatch.setattr(probe, "probe", lambda *x, **k: (_ for _ in ()).throw(AssertionError("queried again")))
+    cli.main(["--profile", prof.dir, "probe", "1B_48", "--tables", "T2,T1"])
+    printed = capsys.readouterr().out
+    assert "reused from 1B_47" in printed and "FOUND (1): orphan (T1)" in printed and "rows:" not in printed
+    assert os.path.exists(os.path.join(b.dir, "probe.md")) and b.state()["steps"]["probe"]["reused_from"] == "1B_47"
+    with pytest.raises(AssertionError):                                   # --fresh really queries
+        cli.main(["--profile", prof.dir, "probe", "1B_48", "--tables", "T1,T2", "--fresh"])
+    with pytest.raises(AssertionError):                                   # other tables: no reuse
+        cli.main(["--profile", prof.dir, "probe", "1B_48", "--tables", "T1"])
+
+
+def test_probe_reuse_needs_no_db_and_db_outage_is_one_line(tmp_path, capsys, monkeypatch):
+    import json as J
+    from reportkit import cli, db, probe
+    prof = _mini_profile(tmp_path, {"paths": {"tools_dir": str(tmp_path / "tools"), "work_root": str(tmp_path / "w")}})
+    a, b = prof.workspace("1B_47"), prof.workspace("1B_48")
+    trace = {"sql_objects": ["T1", "T2"], "top": []}
+    for w in (a, b):
+        open(os.path.join(w.dir, "trace.json"), "w", encoding="utf-8").write(J.dumps(trace))
+    open(os.path.join(a.dir, "probe.json"), "w", encoding="utf-8").write(J.dumps({"schema": "default", "tables": {"T1": {"traps": []}}}))
+    def down(*x, **k):
+        import oracledb
+        raise oracledb.OperationalError("DPY-6005: cannot connect to database (CONNECTION_ID=x). timed out")
+    monkeypatch.setattr(db, "tables", down); monkeypatch.setattr(db, "q", down)
+    cli.main(["--profile", prof.dir, "probe", "1B_48"])                     # same trace objects: reused, DB never called
+    assert "reused from 1B_47" in capsys.readouterr().out
+    with pytest.raises(SystemExit) as e:                                    # a real query while the DB is down
+        cli.main(["--profile", prof.dir, "probe", "1B_48", "--fresh"])
+    assert str(e.value).startswith("network: OperationalError") and "\n" not in str(e.value)
+
+
+def test_parallel_expired_sessions_log_in_once(tmp_path, monkeypatch):
+    import threading, time as T
+    from reportkit import auth
+    prof = _mini_profile(tmp_path, {"paths": {"tools_dir": str(tmp_path / "tools"), "work_root": str(tmp_path / "w")}})
+    system = next(iter(prof.systems))
+    state = {"valid": False, "logins": 0}
+    monkeypatch.setattr(auth, "whoami", lambda p, s: {"ok": state["valid"], "login": "gms"})
+    def fake_login(p, s, t=None, h=True):
+        state["logins"] += 1; T.sleep(0.05); state["valid"] = True
+        return {"ok": True, "login": "gms"}
+    monkeypatch.setattr(auth, "_login", fake_login)
+    monkeypatch.setattr(auth, "LOCK_POLL_S", 0.01)
+    out, errs = [], []
+    def run():
+        try:
+            out.append(auth.ensure(prof, system))
+        except BaseException as e:            # a thread that dies must fail the test with its reason
+            errs.append(repr(e))
+    for _ in range(20):                       # the race is rare: repeat it
+        state.update(valid=False, logins=0); out.clear()
+        ths = [threading.Thread(target=run) for _ in range(5)]
+        [t.start() for t in ths]; [t.join() for t in ths]
+        assert not errs and state["logins"] == 1 and len(out) == 5 and all(w["ok"] for w in out)
+    lock = auth.http.session_paths(prof, system)[0] + ".lock"
+    assert not os.path.exists(lock)
+    open(lock, "w").close(); os.utime(lock, (T.time() - 999, T.time() - 999))   # a stale lock from a killed login
+    state["valid"] = False
+    assert auth.ensure(prof, system)["ok"] and state["logins"] == 2 and not os.path.exists(lock)

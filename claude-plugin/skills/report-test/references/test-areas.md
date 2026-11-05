@@ -54,7 +54,7 @@ Pick the items that exist on the screen. Each item below is one test case, unles
 - Grid pagination / page size, when the report has a grid.
 - The grid and the file show the same rows and values, for the same filter.
 
-## Chức năng: data. This is the core; derive it from the rules of `analysis.md` + Quy chuẩn I.2.
+## Chức năng: data. This is the core; derive it from the rules of `analysis.txt` + Quy chuẩn I.2.
 
 For each rule in the report's view (the WHERE conditions, joins, dedup/ROW_NUMBER, CASE, TO_CHAR), write one case:
 - **Scope of source records:**
@@ -93,52 +93,22 @@ For each rule in the report's view (the WHERE conditions, joins, dedup/ROW_NUMBE
 
 ## An toàn thông tin (always the last category)
 
-A report screen takes input in three places — the filter fields, the URL, and the data it renders — so cover XSS and
-SQL Injection across those. Write the cases in two sub-sections plus one Insert case. Judge each against what the app
-did, not the payload. This is defensive, read-only checking; keep to the safety rules below.
+A report screen takes input in three places: the filter fields, the URL and the data it renders. Defensive, read-only checks; judge what the app did, not the payload. Two sub-sections plus one Insert case:
 
-**1. Kiểm tra XSS**
-- *Đoạn mã kịch bản nhập vào bộ lọc.* Type a script snippet into a text field of the filter; if the screen has no
-  saved text field, use the quick-search box of a dropdown. Expected: shown verbatim, never executed. Three variants —
-  plain, percent/hex-encoded, and several tags nested — as one case each. Name the field as the screen labels it, and
-  confirm on the screenshot which field the text actually went into. A screen with no text input (e.g. a dashboard with
-  only a year list) → "Không áp dụng".
-- *Đoạn mã kịch bản trong đường dẫn.* Put the snippet (a) in a query parameter of the screen's own route and (b) as an
-  invalid path segment. Expected: nothing runs; an invalid path shows a "not found" page. Same three variants.
-- *Dữ liệu trả về chứa đoạn mã.* Stub the search response (in the browser, nothing stored) so a few rows carry a script
-  snippet or an image-with-handler in a text column, run the search, read the grid. Expected: shown as plain text, no
-  element injected, nothing runs. No grid on the screen → "Không áp dụng"; can't reach the grid (required fields) →
-  "Không đo được", say why.
+**1. Kiểm tra XSS** (three variants each, one case per variant: plain, percent / hex encoded, nested tags)
+- *Đoạn mã kịch bản nhập vào bộ lọc*: a script snippet in a text field of the filter (or a dropdown's quick-search box). Name the field as the screen labels it and confirm on the screenshot that the text went into it. Expected: shown verbatim, never run. No text input → "Không áp dụng".
+- *Đoạn mã kịch bản trong đường dẫn*: the snippet in a query parameter of the screen's route, and as an invalid path segment. Expected: nothing runs; an invalid path shows a "not found" page.
+- *Dữ liệu trả về chứa đoạn mã*: stub the search response in the browser (`route`, nothing stored) so a few rows carry a script / image-with-handler in a text column. Expected: plain text, nothing injected or run. No grid → "Không áp dụng"; grid unreachable (required fields) → "Không đo được", with why.
 
 **2. Kiểm tra SQL Injection - Select**
-- *Đăng nhập bằng chuỗi chèn.* If login is a shared SSO owned by another team, don't test it from here → "Chưa thực
-  hiện", say why.
-- *Chuỗi chèn trong tham số lọc và ô tìm kiếm.* Send, in a filter field and in the request, strings that carry SQL
-  control syntax: a lone quote with an always-true condition, a query that joins another table, a query that drops a
-  table, a query that lists tables. Expected: rejected or "không tìm thấy", no data outside the user's scope, and **no
-  database error or query text in the response**. Do the "or always-true", the "join", and the "drop/list" as separate
-  cases.
+- *Đăng nhập bằng chuỗi chèn*: login on a shared SSO owned by another team → "Chưa thực hiện", with why.
+- *Chuỗi chèn trong tham số lọc và ô tìm kiếm*: in a filter field and in the request, one case each for a quote with an always-true condition, a query joining another table, a drop / list-tables query. **A destructive payload names a table that does not exist** (`'; DROP TABLE RK_SDETTEST_NO_SUCH_TABLE --`), never a real one: an injectable endpoint then answers with a "table does not exist" error, which proves the bug, and nothing on the shared environment can be lost. Expected: rejected or "không tìm thấy", no data outside the user's scope, **no DB error or query text in the response**.
 
-**Kiểm tra SQL Injection - Insert.** A report screen usually can't add records → "Không áp dụng". If it can, the insert
-must be blocked or store exactly the typed value.
+**Kiểm tra SQL Injection - Insert**: a report screen usually can't add records → "Không áp dụng"; if it can, the insert is blocked or stores exactly the typed value.
 
-### How to measure (kit steps, repo-agnostic)
-- **UI entry:** set a trap for dialogs with a `js` step (record `alert`/`confirm`/`prompt`), type into the field with a
-  `js` step, try the URL with `goto`, stub the data with `route`; observe the recorded dialogs, any injected
-  `img`/`script` node, the page title and final URL. An empty observation usually means a wrong selector — look at the
-  final screenshot.
-- **API/data entry:** call the read-only search endpoint (handler already confirmed read-only) with the injection
-  string in one filter key; record the status, whether the message contains a database error or the query text, and
-  that a plain valid request still returns data afterwards.
+How to measure:
+- UI entry: a `js` step trapping `alert` / `confirm` / `prompt`, typing with `js`, the URL with `goto`, the data stub with `route`; observe the recorded dialogs, any injected `img` / `script` node, the title and final URL. An empty observation usually means a wrong selector: look at the final screenshot.
+- API entry: the read-only search endpoint (handler confirmed read-only) with the string in one filter key; record the status, whether the message has a DB error or query text, and that a plain request still returns data afterwards.
+- Only search / read endpoints, never an export loop, never a real login attempt; the strings never reach a write path.
 
-### Safety (same as the rest of the run)
-- Read-only: only the search / read endpoints, never export in a loop, never a real login attempt, nothing written.
-- The URL and stub cases run in the browser; the injection strings never reach a write path.
-
-### Judging
-- **P:** not executed / rejected / nothing leaked.
-- **F:** it executed, or the response leaked a DB error or the query (table and column names), or an invalid path led
-  to a screen with real data instead of a "not found" page. An F needs two sources (observation + screenshot/response).
-- **Không áp dụng / Chưa thực hiện / Không đo được:** state the reason (no such function, shared SSO, blocked by
-  required fields).
-- Coverage matrix: one row per case family above.
+Judging: **P** not run / rejected / nothing leaked. **F** it ran, the response leaked a DB error or the query (table, column names), or an invalid path reached a screen with real data; two sources as for any F. Otherwise "Không áp dụng" / "Chưa thực hiện" / "Không đo được" with the reason. Coverage matrix: one row per case family.

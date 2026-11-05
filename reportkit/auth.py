@@ -10,13 +10,62 @@ Lessons built in (1E_117, 28/09/2026):
   - never wait for "networkidle": SSO and SPA pages keep background requests open;
   - the SSO URL contains redirect_uri=<web>, so wait for a URL that *starts with* the web base.
 """
+import contextlib
 import os
 import pickle
+import time
 
 from . import http
 
 
+LOCK_POLL_S = 2      # how often a waiting process looks at the login lock (a login takes 15-60 s)
+
+
+@contextlib.contextmanager
+def _login_lock(profile, system, wait_s=150, stale_s=240):
+    """One SSO login at a time per system: parallel agents whose session expired together would otherwise all log in
+    and overwrite each other's session files. A lock older than `stale_s` (a killed login) is taken over."""
+    state, _ = http.session_paths(profile, system)
+    lock = state + ".lock"
+    end = time.time() + wait_s
+    while True:
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            break
+        except (FileExistsError, PermissionError):
+            # PermissionError: Windows answers so while another process is deleting the lock ("delete pending")
+            try:
+                if time.time() - os.path.getmtime(lock) > stale_s:
+                    os.remove(lock); continue
+            except OSError:
+                time.sleep(0.05)
+                continue
+            if time.time() > end:
+                raise SystemExit("another rt process has been logging in to %s for over %d s; run the command again" % (system, wait_s))
+            time.sleep(LOCK_POLL_S)
+    try:
+        yield
+    finally:
+        try:
+            os.remove(lock)
+        except OSError:
+            pass
+
+
 def login(profile, system, login_type=None, headless=True):
+    with _login_lock(profile, system):
+        return _login(profile, system, login_type, headless)
+
+
+def _login(profile, system, login_type=None, headless=True):
+    state, _ = http.session_paths(profile, system)
+    with open(os.path.join(os.path.dirname(state), "login.log"), "a", encoding="utf-8") as f:
+        f.write("%s pid %d SSO login %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), os.getpid(), system))
+    return _login_browser(profile, system, login_type, headless)
+
+
+def _login_browser(profile, system, login_type=None, headless=True):
     import requests
     from playwright.sync_api import sync_playwright
     a = profile.get("auth", {}) or {}
@@ -75,4 +124,9 @@ def whoami(profile, system):
 def ensure(profile, system, login_type=None):
     """Reuse the saved session when it is still valid; log in again otherwise."""
     w = whoami(profile, system)
-    return w if w.get("ok") else login(profile, system, login_type)
+    if w.get("ok"):
+        return w
+    with _login_lock(profile, system):
+        http.reset(profile, system)
+        w = whoami(profile, system)          # another process may have just logged in while this one waited
+        return w if w.get("ok") else _login(profile, system, login_type)

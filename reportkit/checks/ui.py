@@ -85,6 +85,9 @@ def _obs(pg, name, spec, st):
         return _toasts(pg, st["profile"])
     if spec == "url":
         return pg.url
+    if not isinstance(spec, dict) or len(spec) != 1:
+        raise ValueError("observe '%s': expected requests / toasts / url or one {kind: arg} such as {text: \"css\"}, "
+                         "got %r (a quoted YAML mapping is read as a string)" % (name, spec))
     kind, arg = next(iter(spec.items()))
     if kind == "text":
         loc = pg.locator(arg)
@@ -166,16 +169,48 @@ def _screenshot(pg, spec, st, shots):
             loc = _loc(pg, spec["selector"]); loc.scroll_into_view_if_needed()
             bb, pad = loc.bounding_box(), int(spec.get("pad", 12))
             sx, sy = pg.evaluate("()=>[window.scrollX, window.scrollY]")
-            pg.screenshot(path=p, full_page=True, clip={"x": max(0, bb["x"] + sx - pad), "y": max(0, bb["y"] + sy - pad),
+            pg.screenshot(timeout=_SHOT_MS, path=p, full_page=True, clip={"x": max(0, bb["x"] + sx - pad), "y": max(0, bb["y"] + sy - pad),
                                                          "width": bb["width"] + 2 * pad, "height": bb["height"] + 2 * pad})
         else:
-            pg.screenshot(path=p, full_page=spec.get("full_page", True))
+            pg.screenshot(timeout=_SHOT_MS, path=p, full_page=spec.get("full_page", True))
     finally:
         pg.evaluate(_HL_OFF)
     st["obs"].setdefault("screenshots", []).append(p)
 
 
+_SHOT_MS = 60000      # screenshots are evidence, not actions: the short action timeout must not apply to them
+
+# Playwright's call log says why an action waited: keep that line, it names the element in the way
+_WHY = re.compile(r"intercepts pointer events|element is not (?:visible|enabled|editable|stable)|outside of the viewport"
+                  r"|resolved to \d+ elements|strict mode violation|element is detached")
+
+
+def _page_hint(pg, web):
+    """Where the page is and what it shows, as text: usually enough to fix the entry without opening the screenshot."""
+    try:
+        url = pg.url.replace(web, "") or "/"
+        # the main content, not the side menu that comes first in the body
+        text = pg.evaluate("""() => { const el = ['main', '[role=main]', '.page-content', '.main-content', '.content-wrapper']
+            .map(s => document.querySelector(s)).find(e => e && e.innerText.trim()) || document.body;
+            return (el ? el.innerText : '').replace(/\\s+/g, ' ').trim().slice(0, 220); }""")
+        return " | at %s | page shows: %s" % (url, text or "(empty page)")
+    except Exception:
+        return ""
+
+
+def _err_reason(e):
+    lines = [ln.strip(" -") for ln in str(e).splitlines() if ln.strip()]
+    why = next((ln for ln in reversed(lines[1:]) if _WHY.search(ln)), None)
+    wait = next((ln for ln in lines if re.match(r"waiting for (locator|get_by_\w+)\(", ln)), None)
+    if why is None and wait and "Timeout" in lines[0] and not any("resolved to" in ln for ln in lines):
+        why = "the locator matched nothing (%s)" % wait.replace("waiting for ", "")
+    return (lines[0] + (" | " + why if why else ""))[:400] if lines else repr(e)
+
+
 def _step(pg, step, st, shots):
+    if not isinstance(step, dict) or len(step) != 1:
+        raise ValueError("step: expected one {kind: arg} such as {click: {text: \"Tìm kiếm\"}}, got %r "
+                         "(a quoted YAML mapping is read as a string)" % (step,))
     kind, arg = next(iter(step.items()))
     profile = st["profile"]
     if kind == "hover":
@@ -247,6 +282,9 @@ def run(profile, system, check, browser, run_dir):
     ctx = browser.new_context(viewport={"width": 1440, "height": 900}, locale=profile.get("ui.locale", "vi-VN"),
                               storage_state=state if os.path.exists(state) else None, accept_downloads=True)
     pg = ctx.new_page()
+    # a click / fill / hover that can't act within this time is blocked (overlay, wrong selector): fail fast, the ERR
+    # reason says why. Page loads and screenshots keep their own timeouts. Slow ERRs make a run outlast the prompt cache.
+    pg.set_default_timeout(int(check.get("action_timeout_ms", profile.get("ui.action_timeout_ms", 10000))))
     st = {"profile": profile, "calls": [], "obs": {}, "ctx": ctx, "id": check["id"], "web": web,
           "settle_ms": int(check.get("settle_ms", profile.get("ui.settle_ms", 6000)))}
     pg.on("response", lambda r: st["calls"].append([r.request.method, re.sub(r"^.*?/api/v\d+", "", r.url)[:140], r.status])
@@ -256,10 +294,10 @@ def run(profile, system, check, browser, run_dir):
         for r in check.get("routes", []) or []:
             _route(pg, r)
         pg.goto(web + check.get("page", "/"), wait_until="load", timeout=60000)
+        ready = check.get("ready")
         pg.wait_for_timeout(st["settle_ms"])
         if check.get("lang") == "en":
             _set_lang(pg, profile, "en")
-        ready = check.get("ready")
         if ready:
             n = pg.locator(ready["selector"]).count()
             if n < ready.get("min", 1):
@@ -270,9 +308,9 @@ def run(profile, system, check, browser, run_dir):
                     pass
                 n = pg.locator(ready["selector"]).count()
             if n < ready.get("min", 1):
-                p = os.path.join(shots, "%s_not_ready.png" % check["id"]); pg.screenshot(path=p, full_page=True)
-                res.update(status="NM", reason="page not ready: %d x '%s' (need %d)" % (n, ready["selector"], ready.get("min", 1)),
-                           observations=st["obs"], screenshot=p)
+                p = os.path.join(shots, "%s_not_ready.png" % check["id"]); pg.screenshot(timeout=_SHOT_MS, path=p, full_page=True)
+                res.update(status="NM", reason="page not ready: %d x '%s' (need %d)%s" % (
+                    n, ready["selector"], ready.get("min", 1), _page_hint(pg, web)), observations=st["obs"], screenshot=p)
                 return res
         for s in check.get("steps", []) or []:
             _step(pg, s, st, shots)
@@ -280,7 +318,7 @@ def run(profile, system, check, browser, run_dir):
             st["obs"][name] = _obs(pg, name, spec, st)
         final = os.path.join(shots, "%s_final.png" % check["id"])
         res["boxes"] = {"shot": final, "boxes": _boxes(pg, _selectors(check))}   # E.run_shot crops / outlines from these
-        pg.screenshot(path=final, full_page=True)
+        pg.screenshot(timeout=_SHOT_MS, path=final, full_page=True)
         st["obs"].setdefault("screenshots", []).append(final)
         pre = check_all(st["obs"], check.get("require"))
         if pre:
@@ -288,10 +326,10 @@ def run(profile, system, check, browser, run_dir):
         res.update(status="OBS", observations=st["obs"])
     except Exception as e:
         try:
-            p = os.path.join(shots, "%s_error.png" % check["id"]); pg.screenshot(path=p, full_page=True)
+            p = os.path.join(shots, "%s_error.png" % check["id"]); pg.screenshot(timeout=_SHOT_MS, path=p, full_page=True)
         except Exception:
             p = None
-        res.update(status="ERR", reason=str(e).splitlines()[0][:300], observations=st["obs"], screenshot=p)
+        res.update(status="ERR", reason=_err_reason(e), observations=st["obs"], screenshot=p)
     finally:
         ctx.close()
     return res

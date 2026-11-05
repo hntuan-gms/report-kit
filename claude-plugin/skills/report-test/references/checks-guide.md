@@ -3,7 +3,7 @@
 `checks.yaml` lives in the report workspace. It describes **what to measure**, never what the right
 answer is: the kit records, Claude judges. Each entry runs on its own (a fresh browser page per UI entry),
 so one broken entry never spoils the others, and you re-run only what broke with `rt check <code> --redo`
-or `--only <ids>`.
+or `--only <ids>`. A run stops at its time budget (180 s, plus the entry in flight) and leaves the rest as TODO for the next `--redo` (call it with the Bash tool's `timeout: 300000`, so it never moves to the background); `--workers N` runs UI entries in parallel (only on an idle environment: a loaded one answers too slowly).
 
 ```yaml
 system: ids                          # a system key from .report-kit/project.yaml
@@ -71,7 +71,7 @@ Unknown `{names}` are left as they are.
 The kit reads the file **as Excel displays it**: number and date formats are applied, so 2.0 with `#,##0` compares as "2".
 
 Rules for the expected SQL:
-- It is written from the rule as `analysis.md` states it in plain words + the standard, e.g. status APPROVED/CLOSE, language VI, the latest correction, the company scope and data permission the function applies. Never paste the view's SQL: rewrite the rule, so a slip in the view (a wrong join, a midnight bound, a missing filter) shows as DIFF.
+- It is written from the rule as `analysis.txt` states it in plain words + the standard, e.g. status APPROVED/CLOSE, language VI, the latest correction, the company scope and data permission the function applies. Never paste the view's SQL: rewrite the rule, so a slip in the view (a wrong join, a midnight bound, a missing filter) shows as DIFF.
 - **Cover the full scope with `matrix`**: every value the filter or dropdown offers, not a sample, and state the coverage in the workbook.
   - A range is written as one string: `matrix: {year: "{current_year}..2016"}` gives 2026, 2025, …, 2016 (in the order written). Lists can mix ranges and single values: `["2016..2019", "{current_year}"]`.
   - `require: {actual_rows: {min: 1}}` turns a value with no data into NM for the whole entry. Put the values with no data in their own entry without `require`: when the app and your SQL both return nothing, it shows as MATCH (0 cells), which is the evidence for "Không có dữ liệu".
@@ -101,7 +101,7 @@ Every UI entry starts in a fresh browser context with the saved login, and a fin
 **Steps:**
 - mouse and keyboard: `hover`, `click`, `select` (`label` / `value`, `nth`), `fill`, `press`, `tab: N` (records `focus_order`);
 - waiting and navigation: `wait` (ms), `wait_for`, `goto`, `reload`;
-- page state: `set_lang: en|vi`, `zoom: 150`, `offline: true`, `route` (stub one request; also allowed at entry level as `routes:`);
+- page state: `set_lang: en|vi`, `zoom: 150`, `offline: true`, `route` (stub the requests matching a glob: `route: {pattern: "**/accounts/validate**", status: 500, body: '{"message":"Simulated"}'}` (`content_type` defaults to `application/json`) or `route: {pattern: "**/x**", abort: true}`; also allowed at entry level as a `routes:` list, set before the page opens);
 - evidence: `expect_download` (records `{downloaded, name}`; the file is kept in `shots/` as `<id>_<file name>`), `screenshot: name`, `observe`;
 - positions for bug pictures: with the final screenshot, the kit records the position of every observation that has a selector, plus the entry's `boxes: {name: selector}` (e.g. `filters`, `grid`, `toolbar`), in `<id>.json`. `E.run_shot(run, id, caption, mark=[…], show=[…])` crops and outlines from them in step 9 without a new capture, so name the areas a picture would need when you write the entry;
 - bug picture: `screenshot: {name, selector, highlight, pad}` captures only the area of `selector` (+ `pad` px, default 12) with each `highlight` element outlined in red (`"css"`, `{selector, nth}`, or `{selector, all: true}` for every match). The outline is removed right after, so later observations are unaffected. Use it for every bug that shows on the screen; the file feeds `E.shot(...)` of the bug's card (`output-format.md`, "Hình ảnh lỗi");
@@ -123,12 +123,34 @@ Every UI entry starts in a fresh browser context with the saved login, and a fin
 - page content: `text` (first match), `texts` (all), `count`, `attr {selector, name}`, `value`, `js: "() => ..."`;
 - recorded activity: `requests` (API calls made during the entry: method, path, status), `toasts`, `url`.
 
-**Preconditions** (`ready`, `require`) only decide whether the measurement is usable. They never decide whether the app is right. Use them wherever a wrong measurement could look like an app bug, for example:
+**Preconditions** (`ready`, `require`) only decide whether the measurement is usable. `ready` names the element the entry reads (`app-account-table tbody tr`), not a generic one (`app-table`): a generic selector is met by another section that loads first, and the entry then reads an empty table without an NM. They never decide whether the app is right. Use them wherever a wrong measurement could look like an app bug, for example:
 - charts not rendered yet;
 - the tooltip read from the wrong element;
 - a route left over from another step. This can't happen here: each entry has its own context.
 
 **Writing selectors**: open the screen's template (`.html`) before writing a selector. After the first run, look at the final screenshot of every entry whose observation is empty or surprising: an empty result usually means the selector is wrong, not the app.
+
+## Reading the results
+
+`summary.md` grows with the entries (900 lines for 30 UI entries). Read only what you need:
+- `rt show <code> --status ERR,NM` after a run: what to fix;
+- `rt show <code> U03,U05 --keys rows,heads`: some entries, some observations;
+- `rt show <code> --run <id>` for an older run. The latest run carries every entry, re-run or not.
+
+## Scripts (`gen_checks.py`, extra API probes)
+
+Generate a long `checks.yaml` from Python (`yaml.safe_dump(spec, allow_unicode=True, sort_keys=False)`): a quoted mapping like `"{text: 'h5'}"` is a string, not an observation. For read-only probes the kit's helpers are enough, no need to read its source:
+
+```python
+from reportkit import profile as P, http, db
+prof = P.load()                                   # nearest .report-kit/ (or RK_PROFILE)
+status, body = http.json_call(prof, "ids", "GET", "/profile/shareholders/83405", params=None, body=None)
+rows = http.dig(body, "data.items")               # 'a.b[0].c' lookup in the JSON
+res = http.download(prof, "ids", "POST", "/report/R018/export", body={...}, tag="U05")   # {status, fname, path | body}
+recs = db.q(prof, "SELECT ID, NAME FROM T WHERE ID = :id", {"id": 1})                     # SELECT only, list of dicts
+ws = prof.workspace("1B_47"); run = ws.latest_run()                                       # <workspace>/runs/<id>
+```
+Same rules as `rt api` / `rt sql`: only endpoints whose handler you read and found read-only; the session comes from `rt login`.
 
 ## Statuses in summary.md
 
@@ -139,3 +161,4 @@ Every UI entry starts in a fresh browser context with the saved login, and a fin
 | OBS | UI observed | read observations / screenshots, judge against the standard and the function's rules |
 | NM | not measurable (precondition failed) | fix the entry, `rt check <code> --redo` |
 | ERR | the entry itself failed (selector, HTTP, SQL) | fix the entry, `rt check <code> --redo` |
+| TODO | not run: the run reached its time budget (`ui.run_budget_s`, 180 s) | `rt check <code> --redo` |

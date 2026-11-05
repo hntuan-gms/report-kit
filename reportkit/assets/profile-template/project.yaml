@@ -36,6 +36,9 @@ db:
 ui:
   locale: en-US
   settle_ms: 5000
+  run_budget_s: 180                             # rt check stops here (+ the entry in flight) and leaves the rest as TODO (prompt cache ~5 min)
+  workers: 1                                    # UI entries in parallel; >1 only on an idle environment
+  action_timeout_ms: 10000                      # click / fill / hover give up after this (ERR names the blocker); page loads keep 60 s
   api_marker: "/api/"
   toast: "[class*=toast]"
   lang: {}                                      # e.g. {open: "#lang", en: "[aria-label='English']", vi: "..."}

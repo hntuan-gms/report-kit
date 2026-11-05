@@ -18,6 +18,7 @@ Re-run only what broke: `--only D01,U03`, or `--redo` (every NM / ERR of the lat
 entries are carried over from the latest run, so the summary always covers everything.
 """
 import datetime as _dt
+import time as _time
 import json
 import os
 import shutil
@@ -42,16 +43,24 @@ def load(ws):
     return spec
 
 
-def run(profile, ws, only=None, redo=False, kinds=("data", "ui"), label=None):
+def _todo(c, budget):
+    return {"id": c["id"], "title": c.get("title"), "status": "TODO",
+            "reason": "not run: the run reached its %d s budget (kept under the prompt cache's lifetime); "
+                      "`rt check <code> --redo` runs it" % budget}
+
+
+def run(profile, ws, only=None, redo=False, kinds=("data", "ui"), label=None, workers=None, budget=None):
+    budget = int(profile.get("ui.run_budget_s", 180) if budget is None else budget)
+    deadline = _time.time() + budget if budget > 0 else None
     spec = load(ws)
     system = spec.get("system") or next(iter(profile.systems))
     prev = ws.latest_run()
     prev_sum = _read(os.path.join(prev, "summary.json")) if prev and os.path.exists(os.path.join(prev, "summary.json")) else None
     selected = set(only or [])
     if redo and prev_sum:
-        selected |= {c["id"] for c in prev_sum["checks"] if c["status"] in ("NM", "ERR")}
+        selected |= {c["id"] for c in prev_sum["checks"] if c["status"] in ("NM", "ERR", "TODO")}
     if redo and not selected:
-        print("Nothing to redo: the latest run has no NM / ERR entries."); return prev, prev_sum
+        print("Nothing to redo: the latest run has no NM / ERR / TODO entries."); return prev, prev_sum
     run_id = _dt.datetime.now().strftime("%Y%m%d-%H%M%S") + ("-" + label if label else "")
     rd = os.path.join(ws.runs_dir(), run_id); os.makedirs(rd, exist_ok=True)
     bv = dict(base_vars(), login_user=profile.secrets().get("login_user"))
@@ -65,6 +74,8 @@ def run(profile, ws, only=None, redo=False, kinds=("data", "ui"), label=None):
         for c in spec.get("data") or []:
             if not wanted(c):
                 continue
+            if deadline and _time.time() > deadline:
+                results.append(_write(rd, dict(_todo(c, budget), kind="data"))); print("%s TODO" % c["id"]); continue
             parts = []
             for combo in expand_matrix(c.get("matrix"), vars_) or [{}]:
                 try:
@@ -74,20 +85,9 @@ def run(profile, ws, only=None, redo=False, kinds=("data", "ui"), label=None):
             results.append(_write(rd, _merge_data(c, parts)))
             print("%s %s" % (c["id"], results[-1]["status"]))
     if "ui" in kinds and any(wanted(c) for c in spec.get("ui") or []):
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            b = p.chromium.launch()
-            try:
-                for c in spec.get("ui") or []:
-                    if not wanted(c):
-                        continue
-                    rc = render(c, vars_)
-                    r = ui_check.run(profile, system, rc, b, rd)
-                    r.update(kind="ui", title=rc.get("title"))
-                    results.append(_write(rd, r))
-                    print("%s %s" % (c["id"], r["status"]))
-            finally:
-                b.close()
+        entries = [render(c, vars_) for c in spec.get("ui") or [] if wanted(c)]
+        n = max(1, min(int(workers or profile.get("ui.workers", 1)), len(entries)))
+        results += _run_ui(profile, system, entries, rd, n, deadline, budget)
     done = {r["id"] for r in results}
     if selected and prev:
         for c in (spec.get("data") or []) + (spec.get("ui") or []):
@@ -106,6 +106,52 @@ def run(profile, ws, only=None, redo=False, kinds=("data", "ui"), label=None):
         f.write(summary_md(summary, results))
     ws.mark("check", run=run_id, counts=_counts(results))
     return rd, summary
+
+
+def _run_ui(profile, system, entries, rd, workers, deadline=None, budget=0):
+    """UI entries, each in its own browser context. With workers > 1 they run on that many threads, each with its own
+    Playwright and browser (the sync API is per thread), so a long run stays within the prompt cache's lifetime."""
+    import queue
+    import threading
+    from playwright.sync_api import sync_playwright
+    todo, out, lock = queue.Queue(), [], threading.Lock()
+    for c in entries:
+        todo.put(c)
+
+    def worker():
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            try:
+                while True:
+                    if deadline and _time.time() > deadline:
+                        return                  # the rest is reported as TODO below
+                    try:
+                        rc = todo.get_nowait()
+                    except queue.Empty:
+                        return
+                    try:
+                        r = ui_check.run(profile, system, rc, b, rd)
+                    except Exception as e:      # ui_check.run reports its own errors; this guards the thread
+                        r = {"id": rc["id"], "status": "ERR", "reason": str(e).splitlines()[0][:300]}
+                    r.update(kind="ui", title=rc.get("title"))
+                    with lock:
+                        out.append(_write(rd, r))
+                        print("%s %s" % (rc["id"], r["status"]), flush=True)
+            finally:
+                b.close()
+
+    if workers == 1:
+        worker()
+    else:
+        threads = [threading.Thread(target=worker, daemon=True) for _ in range(workers)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+    while not todo.empty():
+        rc = todo.get_nowait()
+        out.append(_write(rd, dict(_todo(rc, budget), kind="ui"))); print("%s TODO" % rc["id"], flush=True)
+    return out
 
 
 def _copy_shots(prev, rd, cid):
@@ -144,7 +190,11 @@ def _counts(results):
     return out
 
 
-def _clip(v, n=400):
+CLIP = 400      # summary.md shortens each observation; `rt show --keys` prints them whole
+
+
+def _clip(v, n=None):
+    n = n or CLIP
     s = json.dumps(v, ensure_ascii=False, default=str)
     return s if len(s) <= n else s[:n] + " …(%d chars, full text in the .json)" % len(s)
 

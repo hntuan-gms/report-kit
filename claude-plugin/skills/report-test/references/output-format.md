@@ -48,7 +48,7 @@ Columns:
 |---|---|---|
 | B | Mục đích kiểm thử | "Kiểm tra …" in plain words, specific ("Kiểm tra số kiểm toán viên 'Hiện tại' không bị âm") |
 | C | Các bước thực hiện | Numbered **screen actions** with the concrete data used ("1. Chọn Từ năm = 2026, Tên công ty = Công ty TNHH KPMG 2. Nhấn [Tìm kiếm] 3. Xem nhóm …"). No API paths |
-| D | Kết quả mong muốn | What must happen, in business terms: the function's rule (from `analysis.md`) or the Quy chuẩn, in plain words. Never "như hệ thống đang làm" |
+| D | Kết quả mong muốn | What must happen, in business terms: the function's rule (from `analysis.txt`) or the Quy chuẩn, in plain words. Never "như hệ thống đang làm" |
 | E/F/G | Lần 1/2/3 | `P` / `F` / `PE` only, with green / red / yellow fill. Empty = not run |
 | H | Kết quả hiện tại | Starts with `Đạt.` (P) / `Sai.` (F) / `Cần BA xác nhận.` (PE, rare) / `Chưa thực hiện - <lý do>` (not run). Then **what was seen on the screen or in the file**, one concrete example (company name, year, value), and for F / PE the cause in business words. No `file:line`, table / column names, record IDs or run ids here |
 | I | Mã lỗi | Bug id from sheet "Danh sách lỗi" |
@@ -96,10 +96,7 @@ Example (P on the function's own rule):
 | H | Đạt. Công ty ILC năm 2025 có cả BCTC Mẹ và BCTC Riêng, không có Hợp nhất: màn hình hiện số của BCTC Mẹ (55,340,627,293). |
 | J | Căn cứ: thiết kế chức năng.<br>Kỹ thuật: R112 ... (file:line); D07 |
 
-Status meaning:
-- `P`: matches the expected result: the Quy chuẩn where it applies, otherwise the function's own rule.
-- `F`: breaks the Quy chuẩn, contradicts the system itself, is plainly wrong for any business rule, fails at runtime, or fails a security case.
-- `PE`: rare. Only when the Quy chuẩn is ambiguous on a point it covers. Link the case to a question in "BA làm rõ".
+Statuses follow SKILL.md "What a verdict is based on"; a `PE` case links to its question in "BA làm rõ".
 
 Run information: fill in the template's comment on the Lần N header (E11) and on H10:
 ```
@@ -111,7 +108,7 @@ Get the build date with `curl -sI <site>/ | grep -i last-modified`.
 
 ## Companion sheets (same order)
 
-1. **Quy tắc nghiệp vụ**: the rules of the function as built, from `analysis.md`. Built with `wb.sheet_rules(rows, title, note)`; columns are `reportkit.workbook.RULE_HEADERS`. One row per rule:
+1. **Quy tắc nghiệp vụ**: the rules of the function as built, from `analysis.txt`. Built with `wb.sheet_rules(rows, title, note)`; columns are `reportkit.workbook.RULE_HEADERS`. One row per rule:
    - hạng mục → the rule in plain words → `file:line` → what the environment showed (with one example) → the Quy chuẩn section it falls under (or `-`) → đánh giá → bug id or case ids → ghi chú. The kit adds an empty "DEV xác nhận" column.
    - Đánh giá: `Đúng` (green), `Lỗi` (red, with the bug id), `Lưu ý` (yellow: correct but worth knowing, e.g. a sibling report applies another scope).
    - The note in row 2 names the repo commit the `file:line` references point to, and the dev run dates.
@@ -170,18 +167,6 @@ Rules:
 - The sheet note (row 2) gives: capture date and time range, build, accounts (and which bug used another account), browser size (1440x900), what the Excel pictures are ("dựng lại từ chính file đã tải về; ô sai tô đỏ, cột nền xanh do Tester ghi giá trị đúng"), "Dữ liệu nguồn: SELECT chỉ đọc", "Không tạo / sửa dữ liệu trên môi trường".
 - Never patch a workbook that has pictures with `openpyxl.load_workbook` + `save`: without Pillow, openpyxl drops every image when it loads a file. Change `build_workbook.py` and rebuild a new version.
 
-## Hand-off message to the user
-
-- Start with one line naming the audience ("Written for: …").
-- Give the path.
-- Give counts per section (P/F/PE/not run). `rt build <code>` (or `rt tally <file>`) prints them and flags rows whose H is empty or only a status, and F rows without a bug id.
-- Give the data comparison coverage: cases exported, filled cells compared, number wrong.
-- Give the requirement coverage from "Ma trận bao phủ": rows with cases, rows not applicable, rows not covered and why.
-- List the main bugs, each with one concrete example, and the number of pictures in "Hình ảnh lỗi" (bugs with `Không có hình`, and why).
-- Say what could not be run and why.
-- Say what changed compared with the previous version.
-- List the half-built functions found in the code (no case was written for them).
-
 ## The builder script (`<workspace>/build_workbook.py`)
 
 ```python
@@ -226,4 +211,19 @@ wb.sheet_coverage([
 ], "Ma trận bao phủ: [# 1E_117] ...")
 print(wb.save())          # the last printed line must be the file path (rt build reads it)
 ```
-Always write cells through `tc()` / `table()`: text starting with "=" is kept as text there.
+Always write cells through `tc()` / `table()`: text starting with "=" is kept as text there. Put numbers into case text with f-strings, not `"…" % x`: the text itself holds percentages ("7,96%"), and `%` formatting then fails. `tc()`, `sheet_coverage()` and the quality gate list every problem at once: fix them all, then rebuild (it replaces this run's own draft).
+
+### API at a glance (no need to open the kit's source)
+
+`W.Workbook(prof, ws, name, screen, ticket="", ascii_name="", version=1)`
+- structure: `chapter(t)`, `pre(t)`, `cat(t)`, `sub(t)`, `grp(t)`; a case: `tc(purpose, steps, expected, basis=None, status=None, actual=None, bug=None)` (steps / expected / actual: text or list of lines; status `P` / `F` / `PE` / None)
+- `finish(run_date, run_note, author="")` closes the case sheet; then the companion sheets in this order:
+- `sheet_rules(rows, title, note)`: rows of 8 = `RULE_HEADERS[1:9]` (Hạng mục, Quy tắc, file:line, Kết quả trên môi trường, Quy chuẩn, Đánh giá `Đúng` / `Lỗi` / `Lưu ý`, Mã lỗi / case, Ghi chú); STT and "DEV xác nhận" are added
+- `sheet_bugs(rows, title)`: rows of 7 = Mã lỗi, Mức độ, Trạng thái, Mô tả, Căn cứ, Nguyên nhân (code), Bằng chứng / tái hiện
+- `sheet_evidence(cards, title, note, no_image={bug: reason})`, after `sheet_bugs`
+- `sheet_details(rows, title, note)`: rows of 7 = `DETAIL_HEADERS`; `W.details_from_run(run_dir, causes=None)` builds them from the data entries
+- `sheet_ba(rows, title)` (only with a PE), `sheet_sources(rows, title, headers, widths)`, `sheet_coverage(rows, title)`: rows `(source, item, requirement, case_keys, note)`
+- `save()` returns the path; print it last
+
+Evidence (`E`): `card(bug, steps, actual, expected, panels, captured=None, account="", env="", build="", screen="", note="")`, panels:
+`run_shot(run_dir, check_id, caption, mark=(), show=())` · `shot(path, caption, crop=None, boxes=None)` · `excel(path, caption, cells=None, rows=None, cols=None, bad=None, ok=None, extra=None)` · `table(caption, headers, rows, roles=None, bad=None)` · `text(caption, body)`.

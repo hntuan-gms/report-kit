@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Write|Edit|mcp__.*",
+        "hooks": [{"type": "command", "command": "python -m reportkit.guard", "timeout": 10}]
+      }
+    ]
+  }
+}

@@ -41,7 +41,7 @@ Có thể thay bằng biến môi trường `RK_LOGIN_USER`, `RK_LOGIN_PASSWORD`
    - mẫu workbook;
    - bẫy dữ liệu riêng của dự án (`rules/traps.yaml`).
 2. **Skill.** Chọn một trong hai cách:
-   - `rt install-skill` (chép skill vào `.claude/skills/report-test` của dự án);
+   - `rt install-skill` (chép skill vào `.claude/skills/report-test` của dự án và thêm hook an toàn `reportkit.guard` vào `.claude/settings.json`: chặn SQL ghi / DDL, hỏi trước khi truy cập DB trực tiếp hoặc gửi request ghi);
    - hoặc cài dạng plugin: trong Claude Code gõ `/plugin marketplace add <thư-mục-clone>` (hoặc `<owner>/<repo>` / URL git), rồi `/plugin install report-kit@gms-qa`.
 3. **Kiểm tra máy:** `rt doctor`. Mọi dòng phải là OK.
 
@@ -50,13 +50,15 @@ Có thể thay bằng biến môi trường `RK_LOGIN_USER`, `RK_LOGIN_PASSWORD`
 | Lệnh | Làm gì |
 |---|---|
 | `rt doctor [--db]` | Kiểm tra thư viện, trình duyệt, hồ sơ, secrets, mạng (DB chỉ khi có `--db`) |
-| `rt start <mã> [--route /đường-dẫn]` | Tìm chức năng, trích Quy chuẩn, workbook cũ (kèm comment), dò code từ menu → màn hình → API → handler / view → `brief.md`. `--route` khi đường dẫn menu không khớp |
+| `rt start <mã> [--menu "A >> B >> tab"] [--route /đường-dẫn] [--retrace]` | Tìm chức năng, trích Quy chuẩn, workbook cũ (kèm comment), dò code từ menu → màn hình → API → handler / view → `brief.md`. `--menu`: đường dẫn menu như trên màn hình, khi danh sách chức năng không ghi (tester trả lời được); `--route` khi biết route; `--retrace` bỏ cache dò code |
 | `rt login` | Đăng nhập SSO thật, lưu phiên. Phiên còn hạn thì dùng lại |
-| `rt probe <mã>` | Chạy bộ bẫy dữ liệu trên các bảng của báo cáo → `probe.md` |
+| `rt probe <mã> [--fresh]` | Chạy bộ bẫy dữ liệu trên các bảng của báo cáo → `probe.md` (chỉ in danh sách FOUND). Mã cùng nhóm đã dò đúng các bảng đó trong ngày thì dùng lại, không truy vấn lại; `--fresh` để truy vấn lại |
 | `rt check <mã> [--only D01,U03] [--redo]` | Chạy `checks.yaml`. Mỗi mục chạy riêng; `--redo` chạy lại các mục NM / ERR |
 | `rt build <mã>` | Chạy `build_workbook.py` của workspace và kiểm chất lượng workbook |
+| `rt show <mã> [U03,D01\|all] [--status ERR,NM] [--keys a,b]` | In riêng các mục cần xem của lượt chạy mới nhất, thay vì đọc cả `summary.md` dài |
+| `rt deployed "<chuỗi \| regex>"` | Tìm trong bộ JS frontend đang chạy trên môi trường (bản build có thể khác repo), cache theo ngày |
 | `rt status <mã>` | Bước nào xong, bước nào tiếp theo (tiếp tục khi phiên bị ngắt) |
-| `rt sql "<SELECT>"`, `rt api GET /path` | Tra nhanh (chỉ SELECT; chỉ gọi endpoint đã xác nhận là chỉ đọc) |
+| `rt sql "<SELECT>" ["<SELECT>" …]`, `rt api GET /path` | Tra nhanh, nhiều câu SELECT trong một lần gọi (chỉ SELECT; chỉ gọi endpoint đã xác nhận là chỉ đọc) |
 | `rt dump <file>`, `rt tally <file>` | Đọc xlsx / docx (kèm comment reviewer), đếm P / F / PE của workbook |
 
 Mọi file làm việc nằm ở `~/report-kit-work/<hồ sơ>/<mã>/`, ngoài repo:
@@ -64,7 +66,7 @@ Mọi file làm việc nằm ở `~/report-kit-work/<hồ sơ>/<mã>/`, ngoài r
 | File | Nội dung |
 |---|---|
 | `brief.md` | Tóm tắt đầu vào và kết quả dò code |
-| `analysis.md` | Chức năng như đã xây dựng: các trường, cột, quy tắc (kèm `file:line`), do Claude viết |
+| `analysis.txt` | Chức năng như đã xây dựng: các trường, cột, quy tắc (kèm `file:line`), do Claude viết |
 | `inputs/` | Dòng chức năng, Quy chuẩn, workbook cũ đã trích ra text |
 | `trace.json` | Kết quả dò code, cache theo commit |
 | `probe.md` | Bẫy dữ liệu tìm được |
@@ -86,6 +88,18 @@ Mọi file làm việc nằm ở `~/report-kit-work/<hồ sơ>/<mã>/`, ngoài r
 | Hình minh chứng lỗi | Dựng tay từng hình theo file mẫu | `reportkit.evidence` + `wb.sheet_evidence`: thẻ minh chứng (bước, thực tế / mong đợi, ảnh khoanh đỏ, Excel ô sai tô đỏ, dữ liệu nguồn) sinh vào sheet "Hình ảnh lỗi", liên kết hai chiều với "Danh sách lỗi"; `rt build` chặn lỗi đang mở mà không có hình |
 | Đăng nhập | Lỗi `networkidle`, khớp URL sớm | Đã sửa; tự đăng nhập lại khi phiên hết hạn |
 | Dự án khác | Sửa code | Viết hồ sơ `.report-kit/`; lõi không chứa gì riêng của dự án |
+
+## Nhiều mã trong một yêu cầu
+
+`/report-test 1B_47 1B_48 1B_49 1B_50`: phiên chính chỉ chạy `rt start` cho từng mã, gom các mã cùng màn hình, hỏi người dùng một lần, rồi giao mỗi mã cho **một agent mới**. Mã dẫn đầu của mỗi nhóm chạy trước (song song giữa các nhóm); các mã còn lại chạy song song sau đó, bắt đầu từ `analysis.txt` / `checks.yaml` / `build_workbook.py` của mã dẫn đầu. Không để một agent làm nhiều mã nối tiếp: context của nó phình ra và mọi lượt sau phải đọc lại (đo trên 1B_47-50: 179 lượt, context 43k → 456k, 46,5M token đọc).
+
+## Đo token
+
+```powershell
+python tools/token_usage.py --project "<thư mục dự án>" --last 3
+```
+
+In mỗi phiên: số lượt, cache-read (chi phí thật), context đầu / giữa / đỉnh, ảnh đã mở, số lệnh `rt`, từng subagent (số lượt, cache-read, context đỉnh) và các kết quả công cụ lớn nhất. Con số `subagent_tokens` Claude Code in ra khi một agent xong chỉ là cỡ context cuối của agent đó, không phải chi phí.
 
 ## Kiểm thử bộ kit
 
